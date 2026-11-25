@@ -20,6 +20,10 @@ test('reviews, edits, stages and withdraws invitations through authenticated for
   assert.match(original, /Missing image/);
   assert.match(original, /name="ticket" value="0042" checked/);
   assert.equal(original.includes('name="ticket" value="0043"'), false);
+  const pageSize = original.match(/<select\b[^>]*\bdata-page-size\b[^>]*>([\s\S]*?)<\/select>/)?.[1];
+  assert.ok(pageSize, 'Recipients shows a rows-per-page selector');
+  assert.deepEqual([...pageSize.matchAll(/<option value="(\d+)"/g)].map(match => match[1]), ['10', '25', '50', '100']);
+  assert.match(pageSize, /<option value="25" selected>/);
 
   const editor = await (await fetch(`${base}/recipients?edit=1`, { headers })).text();
   assert.match(editor, /WhatsApp preview/);

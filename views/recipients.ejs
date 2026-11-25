@@ -136,6 +136,14 @@
           <nav class="pagination review-pagination" aria-label="Recipient pages" data-review-pages hidden>
             <span data-page-label></span>
             <div class="row-actions">
+              <label class="recipient-page-size">
+                Rows per page
+                <select class="button button-small" data-page-size>
+                  <% for (const size of [10, 25, 50, 100]) { %>
+                    <option value="<%= size %>"<% if (size === 25) { %> selected<% } %>><%= size %></option>
+                  <% } %>
+                </select>
+              </label>
               <button type="button" class="button button-small" data-previous>Previous</button>
               <button type="button" class="button button-small" data-next>Next</button>
             </div>

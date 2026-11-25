@@ -41,7 +41,6 @@ function initializeRecipients(workspace) {
   if (!rows.length) return;
   const form = workspace.querySelector('#stage-form');
 
-  const pageSize = 25;
   const storageKey = 'dinnerdance:recipient-deselections';
   const keys = new Set(rows.map(row => row.key));
   const deselected = new Set(readDeselections().filter(key => keys.has(key)));
@@ -49,6 +48,7 @@ function initializeRecipients(workspace) {
   const search = workspace.querySelector('[data-recipient-search]');
   const master = workspace.querySelector('[data-select-view]');
   const pagination = workspace.querySelector('[data-review-pages]');
+  const sizeControl = pagination.querySelector('[data-page-size]');
   const previous = pagination.querySelector('[data-previous]');
   const next = pagination.querySelector('[data-next]');
   const label = pagination.querySelector('[data-page-label]');
@@ -88,6 +88,7 @@ function initializeRecipients(workspace) {
     });
   }
   search.addEventListener('input', () => { page = 1; render(); });
+  sizeControl.addEventListener('change', () => { page = 1; render(); });
   previous.addEventListener('click', () => { page--; render(); });
   next.addEventListener('click', () => { page++; render(); });
   form.addEventListener('formdata', event => {
@@ -119,6 +120,7 @@ function initializeRecipients(workspace) {
     const phoneSearch = /^[\d+(). -]+$/.test(needle) ? needle.replace(/\D/g, '') : '';
     filtered = rows.filter(row => (filter === 'all' || row.status === filter) &&
       (row.search.includes(needle) || (phoneSearch && row.digits.includes(phoneSearch))));
+    const pageSize = Number(sizeControl.value);
     const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
     page = Math.max(1, Math.min(page, pages));
     const offset = (page - 1) * pageSize;

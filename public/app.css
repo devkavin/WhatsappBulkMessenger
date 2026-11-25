@@ -180,6 +180,8 @@ tbody th { font-variant-numeric: tabular-nums; }
 .table-empty { padding: 1rem; }
 .review-pagination { margin-top: 0; padding: .65rem 1rem; }
 .review-pagination[hidden] { display: none; }
+[data-review-pages] { flex-wrap: wrap; }
+.recipient-page-size { display: inline-flex; align-items: center; gap: .5rem; color: var(--muted); font-size: .875rem; }
 .staging-bar { margin-top: 1.25rem; padding: .75rem 1rem; position: sticky; bottom: .65rem; box-shadow: 0 4px 14px #0f172a14; }
 .staging-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .75rem; }
 .queue-summary { margin-bottom: 1.25rem; }
