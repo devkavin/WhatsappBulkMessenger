@@ -3,7 +3,7 @@ x-app-environment: &app-environment
   APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to the app's HTTPS origin}
   APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in Coolify}
   SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in Coolify}
-  PORT: 3000
+  PORT: 3100
   DEFAULT_COUNTRY: ${DEFAULT_COUNTRY:-LK}
   DELIVERY_MODE: ${DELIVERY_MODE:-simulate}
   SEND_PER_MINUTE: ${SEND_PER_MINUTE:-8}
@@ -21,11 +21,11 @@ services:
     restart: unless-stopped
     environment: *app-environment
     expose:
-      - "3000"
+      - "3100"
     volumes:
       - ticket_uploads:/app/data
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3

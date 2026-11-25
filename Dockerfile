@@ -15,5 +15,5 @@ COPY --from=build /app/dist ./dist
 COPY views ./views
 COPY public ./public
 USER node
-EXPOSE 3000
+EXPOSE 3100
 CMD ["node", "dist/server.js"]

@@ -4,7 +4,7 @@ Import contacts and ticket images in **Files**, review the message and select re
 
 ## Coolify configuration
 
-Add the project as a Docker Compose application using `compose.yaml`. Run the app and worker on the same Coolify server and destination network as MySQL and connect them to that predefined network. Route the app service's HTTPS domain to port `3000`. The worker uses the same private database and reads from the shared image volume. [Coolify Compose applications](https://coolify.io/docs/docs/applications/builds/docker-compose) · [Coolify MySQL](https://coolify.io/docs/databases/mysql)
+Add the project as a Docker Compose application using `compose.yaml`. Run the app and worker on the same Coolify server and destination network as MySQL and connect them to that predefined network. In Coolify's **Domains** settings, route the HTTPS domain to the `app` service on internal port `3100`. The worker uses the same private database and reads from the shared image volume. [Coolify Compose applications](https://coolify.io/docs/applications/builds/docker-compose#configure-public-services) · [Coolify MySQL](https://coolify.io/docs/databases/mysql)
 
 Set these runtime environment variables in Coolify. Use the hostname from the database's internal URL and the credentials for the Dinner Dance application account.
 
