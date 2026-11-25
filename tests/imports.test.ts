@@ -4,18 +4,50 @@ import { readConfig } from '../src/config.ts';
 import { parseContacts } from '../src/imports/contacts.ts';
 import { matchImages } from '../src/imports/matches.ts';
 
-test('loads MySQL configuration from one URL without leaking invalid credentials', () => {
-  const config = readConfig({
-    DATABASE_URL: 'mysql://dinner_dance_app:p%40ss@mysql-host:3307/dinnerdance',
-    APP_PASSWORD: 'a long local password',
-    SESSION_SECRET: '12345678901234567890123456789012',
-  });
+const databaseEnv = {
+  DB_HOST: 'mysql-host',
+  DB_PORT: '3307',
+  DB_USER: 'dinner_dance_app',
+  DB_PASSWORD: 'p@ss:$word#51%/with space',
+  DB_NAME: 'dinnerdance',
+  APP_PASSWORD: 'a long local password',
+  SESSION_SECRET: '12345678901234567890123456789012',
+};
+
+test('loads separate MySQL settings and preserves the password as entered', () => {
+  const config = readConfig(databaseEnv);
   assert.deepEqual(config.database, {
-    host: 'mysql-host', port: 3307, user: 'dinner_dance_app', password: 'p@ss', database: 'dinnerdance',
+    host: 'mysql-host', port: 3307, user: 'dinner_dance_app', password: 'p@ss:$word#51%/with space', database: 'dinnerdance',
   });
-  assert.throws(() => readConfig({ DATABASE_URL: 'http://user:secret@localhost/db' }), {
-    message: 'Set DATABASE_URL to a valid MySQL connection URL.',
+});
+
+test('uses the default MySQL port and retains certificate verification when TLS is enabled', () => {
+  const { database } = readConfig({ ...databaseEnv, DB_HOST: '[::1]', DB_PORT: undefined, DB_SSL: 'true' });
+  assert.deepEqual(database, {
+    host: '::1', port: 3306, user: 'dinner_dance_app', password: 'p@ss:$word#51%/with space', database: 'dinnerdance',
+    ssl: { rejectUnauthorized: true },
   });
+});
+
+test('identifies invalid MySQL settings without leaking credentials', () => {
+  const invalidSettings = [
+    ['DB_HOST', 'mysql://user:secret-in-host@localhost/db'],
+    ['DB_HOST', 'mysql-host:3306'],
+    ['DB_PORT', '0'],
+    ['DB_PORT', '65536'],
+    ['DB_PORT', '3.5'],
+    ['DB_USER', ''],
+    ['DB_PASSWORD', ''],
+    ['DB_NAME', ''],
+    ['DB_SSL', 'yes'],
+  ];
+  for (const [key, value] of invalidSettings) {
+    assert.throws(
+      () => readConfig({ ...databaseEnv, [key]: value }),
+      (error: Error) => error.message.startsWith(`Set ${key} `) &&
+        !error.message.includes(databaseEnv.DB_PASSWORD) && !error.message.includes('secret-in-host'),
+    );
+  }
 });
 
 test('imports reordered columns, BOM, quoted names, and ticket numbers as text', () => {

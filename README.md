@@ -6,11 +6,16 @@ Import contacts and ticket images in **Files**, review the message and select re
 
 Add the project as a Docker Compose application using `compose.yaml`. Run the app and worker on the same Coolify server and destination network as MySQL and connect them to that predefined network. In Coolify's **Domains** settings, route the HTTPS domain to the `app` service on internal port `3100`. The worker uses the same private database and reads from the shared image volume. [Coolify Compose applications](https://coolify.io/docs/applications/builds/docker-compose#configure-public-services) · [Coolify MySQL](https://coolify.io/docs/databases/mysql)
 
-Set these runtime environment variables in Coolify. Use the hostname from the database's internal URL and the credentials for the Dinner Dance application account.
+Set these runtime environment variables in Coolify. Use the hostname from the database's internal URL and the credentials for the Dinner Dance application account. Enter the password as issued. In Coolify, select **Literal** for `DB_PASSWORD` if it contains `$`. [Coolify environment variables](https://coolify.io/docs/applications/configuration/environment-variables#multiline-and-literal-values)
 
 | Variable | Value |
 | --- | --- |
-| `DATABASE_URL` | `mysql://dinner_dance_app:URL_ENCODED_PASSWORD@MYSQL_INTERNAL_HOST:3306/dinnerdance` |
+| `DB_HOST` | The internal MySQL hostname, such as `mysql-host`. |
+| `DB_NAME` | The MySQL database name, such as `dinnerdance`. |
+| `DB_PASSWORD` | The application account's MySQL password. |
+| `DB_PORT` | The internal MySQL port. Defaults to `3306`. |
+| `DB_USER` | The MySQL application username, such as `dinner_dance_app`. |
+| `DB_SSL` | Optional. Set `true` to use MySQL TLS with certificate verification, including when replacing a URL that used `?ssl=true`. Defaults to `false`. |
 | `APP_ORIGIN` | The app's HTTPS origin, such as `https://tickets.example.com` |
 | `APP_PASSWORD` | The operator's sign-in password, at least 12 characters |
 | `SESSION_SECRET` | A separate randomly generated secret, at least 32 characters |
@@ -18,13 +23,13 @@ Set these runtime environment variables in Coolify. Use the hostname from the da
 | `DELIVERY_MODE` | `simulate` by default. Set `live` only for a deployment connected to Wassenger. |
 | `SEND_PER_MINUTE` | Maximum submissions per minute, from 1 to 8. Defaults to 8. Use a lower value when the sender's capacity is shared with Orbit. |
 
-The app accepts a percent-encoded username and password. The `ticket_uploads` volume keeps private image files across redeployments. The Docker image checks `/health` on the app's internal port and records probe errors in Docker's health log. The background worker has no HTTP listener, so its Compose service disables that probe.
+The `ticket_uploads` volume keeps private image files across redeployments. The Docker image checks `/health` on the app's internal port and records probe errors in Docker's health log. The background worker has no HTTP listener, so its Compose service disables that probe.
 
 If Coolify shows **Restarting**, open **Runtime Logs** and select the restarting service to find its startup error. For a running but unhealthy `app` container, inspect the Docker health log with `docker inspect --format '{{json .State.Health}}' <app-container>`. [Coolify health checks](https://coolify.io/docs/applications/configuration/health-checks)
 
 ## Database setup
 
-Provision the dedicated database and account as an approved administrative operation. A new instance needs [001 Files](db/migrations/001_files.sql), [002 invitation staging](db/migrations/002_invitation_staging.sql), and [003 delivery](db/migrations/003_delivery.sql), in that order. For a database running Split 2, `003_delivery.sql` creates the outbound control, test recipient, job and attempt tables and inserts the initial control row. Review and approve migration execution for the target instance before upgrading. Startup uses `DATABASE_URL` and leaves migrations to the administrative connection. The runtime account uses `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on the app's schema.
+Provision the dedicated database and account as an approved administrative operation. A new instance needs [001 Files](db/migrations/001_files.sql), [002 invitation staging](db/migrations/002_invitation_staging.sql), and [003 delivery](db/migrations/003_delivery.sql), in that order. For a database running Split 2, `003_delivery.sql` creates the outbound control, test recipient, job and attempt tables and inserts the initial control row. Review and approve migration execution for the target instance before upgrading. The runtime account uses `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on the app's schema. Apply migrations through the administrative connection.
 
 ## Simulation and live verification
 
