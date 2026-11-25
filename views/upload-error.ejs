@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Files · Dinner Dance</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body class="centered-page">
+  <main class="panel dialog">
+    <h1><%= typeof title === 'string' ? title : 'Check the request' %></h1>
+    <p><%= message %></p>
+    <a class="button" href="<%= typeof back === 'string' ? back : '/files' %>"><%= typeof backLabel === 'string' ? backLabel : 'Back to files' %></a>
+  </main>
+</body>
+</html>

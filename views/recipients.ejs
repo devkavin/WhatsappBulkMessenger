@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recipients · Dinner Dance</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/recipients.js" defer></script>
+</head>
+<body>
+  <%- include('navigation', { active: 'recipients' }) %>
+
+  <main class="workspace" data-recipient-list>
+    <div class="page-title">
+      <h1>Review recipients</h1>
+      <a class="button" href="/recipients?edit=1#message-editor">Edit message</a>
+    </div>
+
+    <% if (error) { %><p class="notice notice-error" role="alert"><%= error %></p><% } %>
+    <% if (notice) { %><p class="notice notice-success" role="status"><%= notice %></p><% } %>
+    <% if (edit) { %>
+      <section class="panel message-panel" id="message-editor" aria-labelledby="message-editor-label">
+        <h2 id="message-editor-label">Edit invitation</h2>
+        <form class="message-form" action="/recipients/message" method="post">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <label for="template">Message</label>
+          <p class="muted" id="template-help">Use <code>{{ticket_number}}</code> to include each recipient’s ticket number.</p>
+          <textarea id="template" name="template" maxlength="<%= messageMaxLength %>" aria-describedby="template-help" rows="4" required><%= editorValue %></textarea>
+          <div class="row-actions">
+            <button type="submit" class="button button-primary">Save message</button>
+            <button type="button" class="button" data-insert-ticket hidden>Insert ticket number</button>
+            <a href="/recipients" class="button">Cancel</a>
+          </div>
+        </form>
+      </section>
+    <% } %>
+
+    <div class="panel review-files">
+      <div class="review-files-items">
+        <span class="file-summary"><span class="file-mark" aria-hidden="true"></span><strong><%= review.filename ?? 'No CSV uploaded' %></strong></span>
+        <span class="muted"><%= review.imageCount %> ticket <%= review.imageCount === 1 ? 'image' : 'images' %></span>
+      </div>
+      <a class="button button-small" href="/files">Manage uploads</a>
+    </div>
+
+    <form action="/recipients/stage" id="stage-form" method="post" data-candidate-count="<%= review.candidateCount %>">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <input type="hidden" name="version" value="<%= review.version %>">
+    </form>
+
+      <section class="panel table-panel" aria-label="Invitation recipients">
+        <div class="table-toolbar" data-review-tools hidden>
+          <div class="review-filters" aria-label="Filter recipients">
+            <button type="button" data-filter="all" aria-pressed="true">All <span><%= review.rows.length %></span></button>
+            <button type="button" data-filter="ready" aria-pressed="false">Ready <span><%= ready %></span></button>
+            <button type="button" data-filter="attention" aria-pressed="false">Needs attention <span><%= attention %></span></button>
+          </div>
+          <label class="search-control">
+            <span class="visually-hidden">Search by name, phone or ticket</span>
+            <input type="search" data-recipient-search placeholder="Search name, phone or ticket">
+          </label>
+        </div>
+
+        <% if (!review.rows.length) { %>
+          <p class="empty-state table-empty">Upload the contact CSV and ticket images on the <a href="/files">Files</a> tab to review invitations.</p>
+        <% } else { %>
+          <div class="table-wrap" role="region" aria-label="Recipient selection" tabindex="0">
+            <table class="review-table">
+              <thead><tr>
+                <th scope="col" class="checkbox-cell"><input type="checkbox" data-select-view aria-label="Select eligible recipients in the current results" hidden></th>
+                <th scope="col">Ticket no.</th><th scope="col">Rank</th><th scope="col">Name</th><th scope="col">Contact</th>
+                <th scope="col">Ticket image</th><th scope="col">Actions</th>
+              </tr></thead>
+              <tbody>
+                <% for (const row of review.rows) { const { contact } = row; %>
+                  <tr data-recipient data-status="<%= row.status %>" data-key="<%= row.selectionKey %>" data-search="<%= [contact.name, contact.phone, contact.contact, contact.ticketNumber].filter(Boolean).join(' ') %>" data-phone="<%= contact.phone ?? '' %>">
+                    <td class="checkbox-cell">
+                      <% if (row.status === 'ready') { %>
+                        <input type="checkbox" form="stage-form" name="ticket" value="<%= contact.ticketNumber %>" checked data-candidate-index="<%= row.candidateIndex %>" aria-label="Select ticket <%= contact.ticketNumber %> for <%= contact.name %>">
+                      <% } else { %>
+                        <input type="checkbox" disabled aria-label="Ticket <%= contact.ticketNumber || 'number missing' %> is <%= row.status === 'queued' ? 'already queued' : 'ineligible' %>">
+                      <% } %>
+                    </td>
+                    <th scope="row"><%= contact.ticketNumber || '—' %></th>
+                    <td><%= contact.rank || '—' %></td>
+                    <td><%= contact.name || '—' %></td>
+                    <td><%= contact.phone || contact.contact || '—' %></td>
+                    <td>
+                      <% if (row.imageStatus === 'matched') { %><span class="status status-success"><span aria-hidden="true">✓</span> Matched</span>
+                      <% } else { %><span class="status status-warning"><span aria-hidden="true">⚠</span> <%= row.imageStatus === 'conflict' ? 'Conflicting images' : 'Missing image' %></span><% } %>
+                      <% if (contact.issues.length) { %><div class="row-hint"><%= contact.issues.join(' · ') %></div><% } %>
+                    </td>
+                    <td>
+                      <% if (row.status === 'queued') { %>
+                        <a href="/queue?q=<%= encodeURIComponent(contact.ticketNumber) %>">View in queue</a>
+                      <% } else if (row.imageStatus === 'matched') { %>
+                        <button type="button" class="link-button" data-preview aria-expanded="false" aria-controls="preview-<%= contact.row %>" hidden>Preview</button>
+                        <noscript><a href="/files/images/<%= row.images[0].id %>" target="_blank" rel="noopener">View image</a></noscript>
+                      <% } else { %>
+                        <a href="/files?view=attention#images">Manage image</a>
+                      <% } %>
+                    </td>
+                  </tr>
+                  <% if (row.status !== 'queued' && row.imageStatus === 'matched') { %>
+                    <tr data-preview-row id="preview-<%= contact.row %>" hidden>
+                      <td colspan="7">
+                        <div class="invitation-preview">
+                          <a href="/files/images/<%= row.images[0].id %>" target="_blank" rel="noopener" aria-label="Open ticket <%= contact.ticketNumber %> image">
+                            <img data-src="/files/images/<%= row.images[0].id %>" alt="Ticket <%= contact.ticketNumber %>">
+                          </a>
+                          <div><strong>Message preview</strong><p class="invitation-message"><%= row.message %></p></div>
+                        </div>
+                      </td>
+                    </tr>
+                  <% } %>
+                <% } %>
+              </tbody>
+            </table>
+          </div>
+          <p class="empty-state table-empty" data-no-recipients hidden>No recipients match this view.</p>
+          <nav class="pagination review-pagination" aria-label="Recipient pages" data-review-pages hidden>
+            <span data-page-label></span>
+            <div class="row-actions">
+              <button type="button" class="button button-small" data-previous>Previous</button>
+              <button type="button" class="button button-small" data-next>Next</button>
+            </div>
+          </nav>
+        <% } %>
+      </section>
+
+      <div class="staging-bar panel">
+        <div class="staging-summary">
+          <strong data-selected-count role="status"><%= ready %> <%= ready === 1 ? 'recipient' : 'recipients' %> selected</strong>
+          <span class="muted">Review staged invitations in the Queue tab.</span>
+        </div>
+        <button type="submit" form="stage-form" class="button button-primary" data-stage <%= ready ? '' : 'disabled' %>><%= ready ? `Add ${ready} to queue` : 'Add to queue' %></button>
+      </div>
+  </main>
+</body>
+</html>

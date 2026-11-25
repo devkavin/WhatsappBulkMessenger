@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Queue · Dinner Dance</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <%- include('navigation', { active: 'queue' }) %>
+
+  <main class="workspace">
+    <div class="page-title">
+      <h1>Sending queue</h1>
+      <% if (dashboard?.state === 'running' || dashboard?.state === 'paused') { %>
+        <form action="/queue/control" method="post">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <button type="submit" name="action" value="<%= dashboard.state === 'running' ? 'pause' : 'resume' %>" class="button"><%= dashboard.state === 'running' ? 'Pause sending' : 'Resume sending' %></button>
+        </form>
+      <% } else if (dashboard?.state === 'settings-changed') { %>
+        <form action="/queue/control" method="post">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <button type="submit" name="action" value="end-changed" class="button">End previous batch</button>
+        </form>
+      <% } else if (canStart) { %>
+        <form action="/queue/control" method="post" class="queue-control">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <% if (mode === 'live') { %><label><input type="checkbox" name="consent" value="yes" required> Recipients opted in</label><% } %>
+          <button type="submit" name="action" value="start" class="button button-primary">Start sending</button>
+        </form>
+      <% } else { %><button type="button" class="button" disabled>Start sending</button><% } %>
+    </div>
+    <% if (error) { %><p class="notice notice-error" role="alert"><%= error %></p><% } %>
+    <% if (notice) { %><p class="notice notice-success" role="status"><%= notice %></p><% } %>
+    <section class="panel queue-dashboard" aria-label="Queue summary">
+      <div class="queue-summary">
+        <div>
+          <h2><%= dashboard?.state === 'running' ? 'Sending' : dashboard?.state === 'paused' ? 'Paused' : dashboard?.state === 'settings-changed' ? 'Sending settings changed' : 'Waiting to start' %></h2>
+          <% if (mode === 'simulate') { %><p class="muted">Simulation mode · Up to <%= rate %> submissions per minute</p><% } %>
+          <% if (mode === 'live') { %><p class="muted">Live mode · Up to <%= rate %> submissions per minute</p><% } %>
+          <% if (dashboard?.state === 'settings-changed') { %><p class="muted">Restore the previous settings to continue, or end that batch to review its unsent work.</p><% } %>
+          <% if (dashboard && !dashboard.liveReady) { %><p class="muted">Complete a delivered <a href="/test-sends">live test</a> to unlock event sending.</p><% } %>
+        </div>
+        <a class="button" href="/queue?view=<%= view %>&amp;q=<%= encodeURIComponent(search) %>&amp;page=<%= page %>">Refresh status</a>
+      </div>
+      <% const activeJobs = dashboard?.runId ? dashboard.jobs.filter(job => job.runId === dashboard.runId) : []; %>
+      <% if (activeJobs.length) { const attempted = activeJobs.filter(job => job.status !== 'queued').length; %>
+        <p class="muted"><%= attempted %> of <%= activeJobs.length %> attempted in this batch</p>
+        <progress class="batch-progress" value="<%= attempted %>" max="<%= activeJobs.length %>" aria-label="Batch progress"></progress>
+      <% } %>
+      <dl class="queue-counts">
+        <% for (const status of ['queued', 'submitted', 'delivered', 'failed', 'review']) { %>
+          <div><dt><%= deliveryLabels[status] %></dt><dd class="count-<%= status %>"><%= counts[status] %></dd></div>
+        <% } %>
+      </dl>
+    </section>
+
+    <section class="panel table-panel" aria-label="Staged invitations">
+      <div class="table-toolbar">
+        <h2>Invitations</h2>
+        <form class="queue-search" method="get" action="/queue">
+          <label><span class="visually-hidden">Filter by status</span><select name="view" class="button button-small">
+            <option value="all" <%= view === 'all' ? 'selected' : '' %>>All statuses</option>
+            <% for (const status of Object.keys(counts)) { %>
+              <option value="<%= status %>" <%= view === status ? 'selected' : '' %>><%= deliveryLabels[status] %> (<%= counts[status] %>)</option>
+            <% } %>
+          </select></label>
+          <label class="search-control"><span class="visually-hidden">Search queue</span><input type="search" name="q" value="<%= search %>" placeholder="Search name, phone or ticket"></label>
+          <button type="submit" class="button button-small">Search</button>
+        </form>
+      </div>
+
+      <% if (!rows.length) { %>
+        <p class="empty-state table-empty"><%= search ? 'No invitations match that search.' : view === 'removed' ? 'Removed invitations will appear here.' : 'Select recipients to add invitations to the queue.' %></p>
+      <% } else { %>
+        <div class="table-wrap" role="region" aria-label="Invitations" tabindex="0">
+          <table class="queue-table">
+            <thead><tr><th scope="col">Ticket no.</th><th scope="col">Recipient</th><th scope="col">Contact</th><th scope="col">Status</th><th scope="col">Last update</th><th scope="col">Actions</th></tr></thead>
+            <tbody>
+              <% for (const row of rows) { %>
+                <tr>
+                  <th scope="row"><%= row.ticketNumber %></th>
+                  <td><%= row.name %></td>
+                  <td><%= row.phone %></td>
+                  <td><span class="status delivery-<%= row.status %>"><%= deliveryLabels[row.status] %></span></td>
+                  <td><time datetime="<%= row.updatedAt.toISOString() %>"><%= displayTime.format(row.updatedAt) %></time></td>
+                  <td>
+                    <div class="row-actions">
+                      <a href="#invitation-<%= row.id %>">View</a>
+                      <% if (row.status === 'queued' && !row.job?.reference) { %>
+                        <form method="post" action="/queue/<%= row.id %>/remove">
+                          <input type="hidden" name="_csrf" value="<%= csrf %>">
+                          <button class="button button-small" type="submit" aria-label="Remove ticket <%= row.ticketNumber %> from the queue">Remove</button>
+                        </form>
+                      <% } %>
+                      <% if (row.status === 'failed' && row.job?.retryable) { %>
+                        <form method="post" action="/queue/retry">
+                          <input type="hidden" name="_csrf" value="<%= csrf %>">
+                          <input type="hidden" name="job" value="<%= row.job.id %>">
+                          <button class="button button-small" type="submit">Retry</button>
+                        </form>
+                      <% } %>
+                    </div>
+                  </td>
+                </tr>
+                <tr class="queue-preview" id="invitation-<%= row.id %>">
+                  <td colspan="6">
+                    <div class="invitation-preview">
+                      <a href="/files/images/<%= row.imageId %>" target="_blank" rel="noopener" aria-label="Open saved ticket <%= row.ticketNumber %> image">
+                        <img loading="lazy" src="/files/images/<%= row.imageId %>" alt="Ticket <%= row.ticketNumber %>">
+                      </a>
+                      <div>
+                        <strong>Saved invitation</strong><p class="invitation-message"><%= row.message %></p>
+                        <% if (row.job?.note) { %><p class="row-hint"><%= row.job.note %></p><% } %>
+                        <% if (row.job?.reference) { %><p class="muted">Attempt <code><%= row.job.reference %></code></p><% } %>
+                      </div>
+                      <a class="queue-preview-close" href="#">Close preview</a>
+                    </div>
+                  </td>
+                </tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+        <% if (pages > 1) { %>
+          <nav class="pagination review-pagination" aria-label="Queue pages">
+            <span><%= (page - 1) * 25 + 1 %>–<%= Math.min(page * 25, total) %> of <%= total %></span>
+            <div class="row-actions">
+              <% if (page > 1) { %><a class="button button-small" href="/queue?view=<%= view %>&amp;q=<%= encodeURIComponent(search) %>&amp;page=<%= page - 1 %>">Previous</a><% } %>
+              <% if (page < pages) { %><a class="button button-small" href="/queue?view=<%= view %>&amp;q=<%= encodeURIComponent(search) %>&amp;page=<%= page + 1 %>">Next</a><% } %>
+            </div>
+          </nav>
+        <% } %>
+      <% } %>
+    </section>
+  </main>
+</body>
+</html>

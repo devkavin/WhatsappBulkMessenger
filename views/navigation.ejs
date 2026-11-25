@@ -1,0 +1,15 @@
+<header class="app-header">
+  <div class="header-inner">
+    <a class="brand" href="/files"><span class="ticket-mark" aria-hidden="true"></span>Dinner Dance</a>
+    <nav class="main-nav" aria-label="Main navigation">
+      <a href="/files" <%= active === 'files' ? 'aria-current=page' : '' %>>Files</a>
+      <a href="/recipients" <%= active === 'recipients' ? 'aria-current=page' : '' %>>Recipients</a>
+      <a href="/queue" <%= active === 'queue' ? 'aria-current=page' : '' %>>Queue</a>
+      <a href="/test-sends" <%= active === 'test-sends' ? 'aria-current=page' : '' %>>Test sends</a>
+    </nav>
+    <form class="sign-out" action="/logout" method="post">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <button type="submit" class="button button-small">Sign out</button>
+    </form>
+  </div>
+</header>

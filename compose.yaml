@@ -1,0 +1,42 @@
+x-app-environment: &app-environment
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in your Coolify environment}
+  APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to the app's HTTPS origin}
+  APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in Coolify}
+  SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in Coolify}
+  PORT: 3000
+  DEFAULT_COUNTRY: ${DEFAULT_COUNTRY:-LK}
+  DELIVERY_MODE: ${DELIVERY_MODE:-simulate}
+  SEND_PER_MINUTE: ${SEND_PER_MINUTE:-8}
+  WASSENGER_API_TOKEN: ${WASSENGER_API_TOKEN:-}
+  WASSENGER_DEVICE_ID: ${WASSENGER_DEVICE_ID:-}
+  WASSENGER_CONNECTOR: ${WASSENGER_CONNECTOR:-}
+  WASSENGER_WEBHOOK_SECRET: ${WASSENGER_WEBHOOK_SECRET:-}
+  WASSENGER_TEMPLATE_NAME: ${WASSENGER_TEMPLATE_NAME:-}
+  WASSENGER_TEMPLATE_LANGUAGE: ${WASSENGER_TEMPLATE_LANGUAGE:-}
+  WASSENGER_TEMPLATE_BODY: ${WASSENGER_TEMPLATE_BODY:-}
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment: *app-environment
+    expose:
+      - "3000"
+    volumes:
+      - ticket_uploads:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    environment: *app-environment
+    stop_grace_period: 35s
+    volumes:
+      - ticket_uploads:/app/data:ro
+
+volumes:
+  ticket_uploads:
