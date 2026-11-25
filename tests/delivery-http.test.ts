@@ -92,5 +92,57 @@ test('authenticates Wassenger callbacks and forwards only the configured sender 
   assert.equal((await post('wrong')).status, 401);
   assert.equal(receipts.length, 0);
   assert.equal((await post(settings.webhookSecret)).status, 204);
-  assert.deepEqual((receipts[0] as any[]).slice(0, 2), ['test-device', [{ids:['a1'], reference:null, status:'delivered'}]]);
+  assert.deepEqual((receipts[0] as any[]).slice(0, 2), ['test-device', [{ids:['a1'], reference:null, status:'delivered', event:'message:out:ack'}]]);
+
+  const postUrl = (query: URLSearchParams, header?: string) => fetch(`${base}/webhooks/wassenger?${query}`, { method:'POST',
+    headers:{'Content-Type':'application/json', ...(header ? {'X-Dinner-Dance-Webhook-Secret':header} : {})}, body:JSON.stringify(payload) });
+  const valid = new URLSearchParams({secret:settings.webhookSecret});
+  assert.equal((await postUrl(valid, 'wrong')).status, 401);
+  assert.equal((await postUrl(new URLSearchParams([['secret', 'wrong'], ['secret', settings.webhookSecret]]))).status, 401);
+  assert.equal((await postUrl(new URLSearchParams({secret:'wrong'}))).status, 401);
+  assert.equal(receipts.length, 1);
+  assert.equal((await postUrl(valid)).status, 204);
+  assert.equal(receipts.length, 2);
+});
+
+test('shows a matched Wassenger webhook separately from the app submission', async t => {
+  const now = new Date('2026-11-25T18:00:00.000Z');
+  const settings = {mode:'live', binding:'fixture', perMinute:8, webhookSecret:'test-fixture-secret-01234567890123',
+    provider:{token:'fixture', device:'test-device', connector:'qr', template:null}} as const;
+  const job = { name:'Test guest', phone:'+94771234567', ticketNumber:'TEST-001', mode:'live', status:'submitted', updatedAt:now,
+    providerStatus:'queued', providerSource:'submission', webhookEvent:null as string | null, webhookReceivedAt:null as Date | null };
+  const staged = { ...job, id:'staged-fixture', imageId:'image-fixture', message:'Your ticket', status:'queued' as const };
+  const {base, signIn, invitationsService} = await testSite(t, {settings, repository:{
+    async dashboard() { return {state:'waiting', liveReady:true, jobs:[{...job, invitationId:staged.id}]}; },
+    async testRecipients() { return []; },
+    async testHistory() { return [job]; },
+    async receipts(_device, receipts, receivedAt) {
+      for (const receipt of receipts) {
+        if (!receipt.ids.includes('test-provider-id')) continue;
+        job.status = job.providerStatus = receipt.status;
+        job.providerSource = 'webhook';
+        job.webhookEvent = receipt.event;
+        job.webhookReceivedAt = receivedAt;
+      }
+      return true;
+    },
+  }});
+  invitationsService.readQueue = async () => [staged];
+  const headers = await signIn();
+  const page = async (path: string) => {
+    const response = await fetch(`${base}${path}`, {headers});
+    assert.equal(response.status, 200);
+    return response.text();
+  };
+  const before = await page('/test-sends');
+  assert.match(before, /App status[\s\S]*Wassenger status[\s\S]*Submitted[\s\S]*Queued/);
+  const hook = await fetch(`${base}/webhooks/wassenger?${new URLSearchParams({secret:settings.webhookSecret})}`, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'message:out:new', device:{id:'test-device'}, data:{id:'test-provider-id', ack:'delivered'}}) });
+  assert.equal(hook.status, 204);
+  const after = await page('/test-sends');
+  assert.match(after, /Submitted[\s\S]*Delivered[\s\S]*message:out:new/);
+  assert.doesNotMatch(after, new RegExp(settings.webhookSecret));
+  const queue = await page('/queue?view=delivered');
+  assert.match(queue, /<h3>App status<\/h3>[\s\S]*<h3>Wassenger status<\/h3>/);
+  assert.match(queue, /<td><span class="status delivery-submitted">Submitted<\/span><\/td>[\s\S]*Delivered[\s\S]*message:out:new/);
 });

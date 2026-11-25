@@ -4,6 +4,7 @@ import { requireOperator, requireRequestToken } from '../auth/session.ts';
 import { InvitationInputError, MESSAGE_MAX_LENGTH, StaleReviewError } from './service.ts';
 import type { InvitationsService } from './service.ts';
 import { deliveryLabels } from '../delivery/routes.ts';
+import { deliveryDisplay, wassengerLabels } from '../delivery/status.ts';
 import type { DeliveryUi } from '../delivery/routes.ts';
 import { deliveryContext, DeliveryInputError } from '../delivery/worker.ts';
 
@@ -77,10 +78,19 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
     const byInvitation = new Map(dashboard?.jobs.map(job => [job.invitationId, job]));
     const all = staged.map(row => {
       const job = byInvitation.get(row.id);
-      return {...row, job, status: row.status === 'removed' ? row.status : job?.status ?? row.status, updatedAt:job?.updatedAt ?? row.updatedAt};
+      const { appStatus, provider } = deliveryDisplay(job);
+      const removed = row.status === 'removed';
+      return {...row, job, provider, status: removed ? row.status : job?.status ?? row.status,
+        appStatus: removed ? row.status : appStatus ?? row.status, updatedAt:job?.updatedAt ?? row.updatedAt};
     });
     const counts = {queued:0, submitting:0, submitted:0, delivered:0, failed:0, review:0, removed:0, cancelled:0};
-    for (const row of all) counts[row.status]++;
+    const appCounts = {...counts};
+    const providerCounts = {accepted:0, queued:0, sent:0, delivered:0, failed:0};
+    for (const row of all) {
+      counts[row.status]++;
+      appCounts[row.appStatus]++;
+      if (row.status !== 'removed' && row.provider?.status) providerCounts[row.provider.status]++;
+    }
     const requested = formText(request.query.view);
     const view = Object.hasOwn(counts, requested) ? requested : 'all';
     const search = formText(request.query.q).trim();
@@ -95,7 +105,8 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
     const canStart = dashboard?.state === 'waiting' && dashboard.liveReady && counts.queued > 0;
     response.status(error ? 409 : 200).render('queue', {
       csrf:request.session?.csrf, dashboard, counts, canStart, error, mode:delivery?.settings.mode,
-      rate:delivery?.settings.perMinute, rows, view, search, page, pages, total:matching.length, notice, displayTime, deliveryLabels,
+      rate:delivery?.settings.perMinute, rows, view, search, page, pages, total:matching.length, notice, displayTime,
+      deliveryLabels, appCounts, providerCounts, wassengerLabels,
     });
   }
   router.post('/queue/:id/remove', readForm, requireRequestToken, async (request, response) => {

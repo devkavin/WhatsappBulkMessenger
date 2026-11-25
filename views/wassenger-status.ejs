@@ -1,0 +1,11 @@
+<% if (provider?.status) { %>
+  <span class="status delivery-<%= provider.status %>"><%= wassengerLabels[provider.status] %></span>
+  <p class="row-hint"><%= provider.source ?? 'Source not recorded' %></p>
+<% } else { %>
+  <span class="muted"><%= provider ? 'No provider status' : '—' %></span>
+<% } %>
+<% if (provider?.webhookEvent && provider.webhookReceivedAt) { %>
+  <p class="row-hint">Last webhook <code><%= provider.webhookEvent %></code><br>
+    <time datetime="<%= provider.webhookReceivedAt.toISOString() %>"><%= displayTime.format(provider.webhookReceivedAt) %></time>
+  </p>
+<% } %>

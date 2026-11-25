@@ -150,6 +150,8 @@ tbody th { font-variant-numeric: tabular-nums; }
 .queue-dashboard + .table-panel { margin-top: 1.25rem; }
 .queue-dashboard .queue-summary { margin-bottom: .8rem; }
 .queue-control, .control-check { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; }
+.queue-status-summary { margin-top: 1rem; }
+.queue-status-summary h3 { font-size: .95rem; margin: 0; }
 .queue-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: .6rem; margin: .8rem 0 0; }
 .queue-counts > div { border-top: 1px solid var(--border); padding: .55rem 0 0; display: flex; align-items: baseline; gap: .55rem; }
 .queue-counts dt { color: var(--muted); }
@@ -160,7 +162,7 @@ tbody th { font-variant-numeric: tabular-nums; }
 .batch-progress { width: 100%; accent-color: var(--accent); }
 .table-toolbar > h2 { padding: .65rem 0; }
 .delivery-queued, .delivery-removed, .delivery-cancelled { color: var(--muted); background: #f1f5f9; }
-.delivery-submitting, .delivery-submitted { color: var(--accent); background: var(--accent-soft); }
+.delivery-submitting, .delivery-submitted, .delivery-accepted, .delivery-sent { color: var(--accent); background: var(--accent-soft); }
 .delivery-delivered { color: var(--green); background: var(--green-soft); }
 .delivery-failed { color: var(--red); background: var(--red-soft); }
 .delivery-review { color: var(--amber); background: var(--amber-soft); }

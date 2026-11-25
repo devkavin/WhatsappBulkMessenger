@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { Pool } from 'mysql2/promise';
 import { mediaLinks } from '../src/delivery/media.ts';
+import { mysqlDeliveryRepository } from '../src/delivery/mysql.ts';
 import { receiptEvents, retryDelay, submissionGap } from '../src/delivery/policy.ts';
+import type { DeliveryStatus } from '../src/delivery/policy.ts';
 import { simulate, wassengerProvider } from '../src/delivery/providers.ts';
 import { deliveryWorker } from '../src/delivery/worker.ts';
+import type { Claimed } from '../src/delivery/worker.ts';
 
 const id = '00000000-0000-4000-8000-000000000042';
 const invitation = { ticketNumber: '0042', name: 'Fixture', phone: '+94771234567', imageId: id, message: 'See you! Ticket 0042.' };
@@ -27,13 +31,51 @@ test('media links are scoped to an image and expire without a session', () => {
 
 test('accepts delivered receipts and batched failures only for the configured device', () => {
   assert.deepEqual(receiptEvents({ event: 'message:out:ack', device: { id: 'other' }, ack: 'read', data: { id: 'p1' } }, 'device'), []);
-  assert.deepEqual(receiptEvents({ event: 'message:out:new', device: { id: 'device' }, data: { id: 'p1', ack: 'sent' } }, 'device'), []);
+  assert.deepEqual(receiptEvents({ event: 'message:out:new', device: { id: 'device' }, data: { id: 'p1', ack: 'sent' } }, 'device'), [
+    { ids: ['p1'], reference: null, status: 'sent', event: 'message:out:new' },
+  ]);
+  assert.deepEqual(receiptEvents({ event: 'message:out:new', device: { id: 'device' }, data: { id: 'p1' } }, 'device'), [
+    { ids: ['p1'], reference: null, status: 'sent', event: 'message:out:new' },
+  ]);
   assert.deepEqual(receiptEvents([
     { event: 'message:out:ack', device: { id: 'device' }, ack: 'read', data: { id: 'p1' } },
     { event: 'message:out:failed', entityId: 'p2', data: { device: { id: 'device' }, reference: `dd-${id}` } },
   ], 'device').map(receipt => [receipt.status, receipt.ids, receipt.reference]), [
     ['delivered', ['p1'], null], ['failed', ['p2'], `dd-${id}`],
   ]);
+});
+
+test('an early matched sent webhook confirms handoff even if the submission response is lost', async () => {
+  const reference = `dd-${id}`;
+  const now = new Date('2026-11-25T18:00:00.000Z');
+  const job: Claimed = { ...invitation, id, reference, status:'submitting', mode:'live', invitationId:id,
+    runId:null, note:null, retryable:0, updatedAt:now, leaseUntil:new Date(+now + 60_000) };
+  const row = { ...job, status: 'submitting' as DeliveryStatus, attemptCount: 1 };
+  const webhookUpdates: unknown[][] = [];
+  const connection = {
+    async beginTransaction() {}, async commit() {}, async rollback() {}, release() {},
+    async execute(sql: string, args: unknown[] = []) {
+      if (sql.includes('FROM outbound_control')) return [[{runId:null}]];
+      if (sql.includes('a.provider_id IS NULL LIMIT 1')) {
+        assert.match(sql, /j.status IN \('submitting', 'submitted'\)/);
+        return [[{id:job.id}]];
+      }
+      if (args.includes('unrecorded-provider-id')) return [[]];
+      if (sql.includes('FROM outbound_jobs j')) return [[row]];
+      if (sql.startsWith('UPDATE outbound_attempts SET provider_webhook')) webhookUpdates.push(args);
+      if (sql.startsWith('UPDATE outbound_jobs SET status')) row.status = args[0] as DeliveryStatus;
+      return [{affectedRows:1}];
+    },
+  };
+  const repository = mysqlDeliveryRepository({ async getConnection() { return connection; } } as unknown as Pool);
+  const early = receiptEvents({ event:'message:out:new', device:{id:'device'}, data:{reference} }, 'device');
+  assert.equal(await repository.receipts('device', early, now), true);
+  assert.equal(row.status, 'submitted');
+  const idOnly = receiptEvents({ event:'message:out:new', device:{id:'device'}, data:{id:'unrecorded-provider-id', ack:'delivered'} }, 'device');
+  assert.equal(await repository.receipts('device', idOnly, now), false);
+  await repository.finish(job, {status:'review', note:'Response lost'}, now, 8000);
+  assert.equal(row.status, 'submitted');
+  assert.deepEqual(webhookUpdates, [['message:out:new', now, reference, now]]);
 });
 
 test('the live adapter sends the configured template, media and attempt reference', async () => {
@@ -44,9 +86,9 @@ test('the live adapter sends the configured template, media and attempt referenc
   }, mediaLinks('https://tickets.example.test', 'synthetic-secret'), async (target, request) => {
     assert.equal(target, 'https://api.wassenger.com/v1/messages');
     sent = JSON.parse(String(request?.body));
-    return Response.json({ id: 'provider-id' }, {status: 201});
+    return Response.json({ id: 'provider-id', deliveryStatus: 'queued' }, {status: 201});
   });
-  assert.deepEqual(await provider.send(invitation, `dd-${id}`), {status: 'submitted', id: 'provider-id', alias: null});
+  assert.deepEqual(await provider.send(invitation, `dd-${id}`), {status: 'submitted', id: 'provider-id', alias: null, providerStatus: 'queued'});
   assert.equal(sent.reference, `dd-${id}`);
   assert.equal(sent.device, 'device');
   const { header, ...template } = sent.template as { header: { media: {type:string; url:string} } };

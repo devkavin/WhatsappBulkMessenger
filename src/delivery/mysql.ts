@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { withDraftLock } from '../db/draft.ts';
 import type { Invitation } from '../invitations/service.ts';
+import type { WassengerStatus } from './policy.ts';
 import { renderApprovedBody } from './providers.ts';
 import { DeliveryInputError } from './worker.ts';
-import type { DeliveryContext, DeliveryRepository, Job, TestRecipient } from './worker.ts';
+import type { DeliveryContext, DeliveryRepository, Job, ProviderStatusSource, TestRecipient } from './worker.ts';
 
 interface Control extends RowDataPacket {
   runId: string | null; binding: string | null; paused: number; nextSendAt: Date | null; nextCheckAt: Date | null;
@@ -16,6 +17,8 @@ interface InvitationRow extends RowDataPacket, Invitation { id: string }
 const JOB_COLUMNS = `j.id, j.invitation_id AS invitationId, j.run_id AS runId, j.mode, j.status, j.current_ref AS reference,
   j.ticket_no AS ticketNumber, j.name, j.phone, j.image_id AS imageId, j.message, j.note, j.retryable,
   j.updated_at AS updatedAt, j.lease_until AS leaseUntil, j.attempt_count AS attemptCount`;
+const PROVIDER_COLUMNS = `a.provider_status AS providerStatus, a.provider_status_source AS providerSource,
+  a.provider_webhook_event AS webhookEvent, a.provider_webhook_at AS webhookReceivedAt`;
 const LEASE_MS = 60_000;
 const REVIEW_NOTE = 'The worker stopped before confirming submission. Check the attempt in Wassenger before resending.';
 
@@ -24,7 +27,9 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
     async dashboard(context) {
       const [control, [jobs], liveReady] = await Promise.all([
         readControl(pool),
-        pool.execute<JobRow[]>(`SELECT ${JOB_COLUMNS} FROM outbound_jobs j WHERE j.active_invitation_id IS NOT NULL AND j.mode = ? ORDER BY j.sequence`, [context.mode]),
+        pool.execute<JobRow[]>(`SELECT ${JOB_COLUMNS}, ${PROVIDER_COLUMNS} FROM outbound_jobs j
+          LEFT JOIN outbound_attempts a ON a.reference = j.current_ref
+          WHERE j.active_invitation_id IS NOT NULL AND j.mode = ? ORDER BY j.sequence`, [context.mode]),
         readyForLive(pool, context),
       ]);
       const state = !control.runId ? 'waiting' : control.binding !== context.binding ? 'settings-changed' : control.paused ? 'paused' : 'running';
@@ -108,7 +113,8 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
       });
     },
     async testHistory() {
-      const [rows] = await pool.execute<JobRow[]>(`SELECT ${JOB_COLUMNS} FROM outbound_jobs j WHERE j.invitation_id IS NULL ORDER BY j.sequence DESC LIMIT 100`);
+      const [rows] = await pool.execute<JobRow[]>(`SELECT ${JOB_COLUMNS}, ${PROVIDER_COLUMNS} FROM outbound_jobs j
+        LEFT JOIN outbound_attempts a ON a.reference = j.current_ref WHERE j.invitation_id IS NULL ORDER BY j.sequence DESC LIMIT 100`);
       return rows;
     },
     async claim(context, now, gap) {
@@ -124,7 +130,8 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
         if (inFlight.length) return null;
         const batch = control.binding === context.binding && !control.paused ? control.runId : null;
         const [jobs] = await connection.execute<JobRow[]>(`
-          SELECT ${JOB_COLUMNS} FROM outbound_jobs j WHERE j.binding = ? AND j.status = 'queued'
+          SELECT ${JOB_COLUMNS}, ${PROVIDER_COLUMNS} FROM outbound_jobs j
+          LEFT JOIN outbound_attempts a ON a.reference = j.current_ref WHERE j.binding = ? AND j.status = 'queued'
           AND (j.invitation_id IS NULL OR j.run_id = ?) ORDER BY j.invitation_id IS NOT NULL, j.sequence LIMIT 1
         `, [context.binding, batch]);
         const job = jobs[0];
@@ -157,14 +164,18 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
         const [rows] = await connection.execute<JobRow[]>(`SELECT ${JOB_COLUMNS} FROM outbound_jobs j WHERE j.id = ? AND j.current_ref = ?`, [job.id, job.reference]);
         const current = rows[0];
         if (!current) return;
+        const providerOutcome = result.status === 'submitted' ? terminalStatus(result.providerStatus) : null;
         if (result.status === 'submitted') {
           await connection.execute('UPDATE outbound_attempts SET provider_id = ?, provider_alias = COALESCE(?, provider_alias) WHERE reference = ?', [result.id, result.alias, job.reference]);
+          await recordProviderStatus(connection, job.reference, result.providerStatus, 'submission');
         }
-        if (current.status === 'submitting' || (current.status === 'review' && result.status === 'submitted')) {
+        const advancesOutcome = providerOutcome && (current.status === 'submitted' || (current.status === 'failed' && providerOutcome === 'delivered'));
+        if (current.status === 'submitting' || (result.status === 'submitted' && (current.status === 'review' || advancesOutcome))) {
           const throttled = result.status === 'throttled';
           const retryable = throttled && current.attemptCount >= 3;
-          const status = throttled ? retryable ? 'failed' : 'queued' : result.status;
-          const note = throttled ? retryable ? 'Wassenger kept throttling this request. Retry is available.' : 'Waiting for the provider rate limit.' : 'note' in result ? result.note : null;
+          const status = throttled ? retryable ? 'failed' : 'queued' : providerOutcome ?? result.status;
+          const note = throttled ? retryable ? 'Wassenger kept throttling this request. Retry is available.' : 'Waiting for the provider rate limit.' :
+            providerOutcome === 'failed' ? 'Wassenger reported a delivery failure.' : 'note' in result ? result.note : null;
           await connection.execute(`UPDATE outbound_jobs SET status = ?, updated_at = ?, note = ?, retryable = ? WHERE id = ?`,
             [status, now, note, Number(retryable), job.id]);
         }
@@ -179,23 +190,30 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
       if (!receipts.length) return true;
       return withControl(pool, async (connection, control) => {
         let unmatched = false;
-        for (const { ids, reference, status } of receipts) {
+        for (const { ids, reference, status, event } of receipts) {
           const list = ids.map(() => '?').join(',');
           const [rows] = await connection.execute<JobRow[]>(`SELECT ${JOB_COLUMNS} FROM outbound_jobs j
             JOIN outbound_attempts a ON a.reference = j.current_ref WHERE j.mode = 'live' AND j.device = ?
+            AND j.dispatch_at IS NOT NULL
             AND (a.reference = ? ${list ? `OR a.provider_id IN (${list}) OR a.provider_alias IN (${list})` : ''})`, [device, reference, ...ids, ...ids]);
           const row = rows[0];
           if (!rows.length) unmatched = true;
-          if (rows.length !== 1 || !['submitting', 'submitted', 'review', 'failed'].includes(row.status) || row.status === status) continue;
+          if (rows.length !== 1 || !row.reference || !['submitting', 'submitted', 'review', 'failed', 'delivered'].includes(row.status)) continue;
+          await connection.execute(`UPDATE outbound_attempts SET provider_webhook_event = ?, provider_webhook_at = ?
+            WHERE reference = ? AND (provider_webhook_at IS NULL OR provider_webhook_at <= ?)`, [event, now, row.reference, now]);
+          if (!status || (row.status === 'delivered' && status !== 'delivered')) continue;
           if (status === 'failed' && row.retryable) continue;
+          await recordProviderStatus(connection, row.reference, status, 'webhook');
+          const nextStatus = terminalStatus(status) ?? (row.status === 'submitting' || row.status === 'review' ? 'submitted' : row.status);
+          if (row.status === nextStatus) continue;
           await connection.execute('UPDATE outbound_jobs SET status = ?, note = ?, retryable = 0, updated_at = ? WHERE id = ?',
-            [status, status === 'failed' ? 'Wassenger reported a delivery failure. Check its message history for details.' : null, now, row.id]);
+            [nextStatus, nextStatus === 'failed' ? 'Wassenger reported a delivery failure. Check its message history for details.' : null, now, row.id]);
         }
         await releaseCompletedRun(connection, control);
         if (!unmatched) return true;
         const [pending] = await connection.execute<RowDataPacket[]>(`SELECT j.id FROM outbound_jobs j
           JOIN outbound_attempts a ON a.reference = j.current_ref
-          WHERE j.mode = 'live' AND j.device = ? AND j.status = 'submitting' AND j.dispatch_at IS NOT NULL
+          WHERE j.mode = 'live' AND j.device = ? AND j.status IN ('submitting', 'submitted') AND j.dispatch_at IS NOT NULL
             AND j.lease_until > ? AND a.provider_id IS NULL LIMIT 1`, [device, now]);
         return !pending.length;
       });
@@ -225,8 +243,11 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
         if (!row || !['review', 'submitted', 'failed', 'delivered'].includes(row.status)) return;
         await connection.execute('UPDATE outbound_attempts SET provider_id = ?, provider_alias = COALESCE(?, provider_alias) WHERE reference = ?',
           [observation.id, observation.alias, reference]);
+        if (row.status !== 'delivered' || observation.status === 'delivered') {
+          await recordProviderStatus(connection, reference, observation.status ?? 'accepted', 'lookup');
+        }
         if (row.status === 'delivered') return;
-        const status = observation.status ?? (row.status === 'review' ? 'submitted' : row.status);
+        const status = terminalStatus(observation.status) ?? (row.status === 'review' ? 'submitted' : row.status);
         if (row.status === status) return;
         await connection.execute('UPDATE outbound_jobs SET status = ?, updated_at = ?, retryable = 0, note = ? WHERE id = ?',
           [status, now, status === 'failed' ? 'Wassenger reported a delivery failure.' : null, row.id]);
@@ -239,6 +260,17 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
       });
     },
   };
+}
+
+function terminalStatus(status: WassengerStatus | null) {
+  return status === 'delivered' || status === 'failed' ? status : null;
+}
+
+async function recordProviderStatus(connection: PoolConnection, reference: string, status: WassengerStatus, source: ProviderStatusSource) {
+  const precedence = "'accepted','queued','sent','failed','delivered'";
+  await connection.execute(`UPDATE outbound_attempts SET provider_status = ?, provider_status_source = ?
+    WHERE reference = ? AND (provider_status IS NULL OR FIELD(CAST(provider_status AS CHAR), ${precedence}) < FIELD(?, ${precedence}))`,
+    [status, source, reference, status]);
 }
 
 async function insertJob(connection: PoolConnection, context: DeliveryContext, invitation: Invitation, invitationId: string | null,

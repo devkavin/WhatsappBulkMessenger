@@ -1,13 +1,19 @@
 import type { Invitation } from '../invitations/service.ts';
 import { submissionGap } from './policy.ts';
-import type { DeliveryReceipt, DeliveryStatus } from './policy.ts';
+import type { DeliveryReceipt, DeliveryStatus, WassengerStatus, WassengerWebhookEvent } from './policy.ts';
 import type { DeliveryProvider, ProviderLookup, ProviderObservation, Submission } from './providers.ts';
 import type { DeliverySettings } from './settings.ts';
+
+export type ProviderStatusSource = 'submission' | 'lookup' | 'webhook';
 
 export type Job = Invitation & {
   id: string; invitationId: string | null; runId: string | null; mode: DeliverySettings['mode'];
   status: DeliveryStatus | 'cancelled'; reference: string | null; note: string | null; retryable: number;
   updatedAt: Date;
+  providerStatus?: WassengerStatus | null;
+  providerSource?: ProviderStatusSource | null;
+  webhookEvent?: WassengerWebhookEvent | null;
+  webhookReceivedAt?: Date | null;
 };
 export type Claimed = Job & { reference: string; leaseUntil: Date };
 export type TestRecipient = { id: string; name: string; phone: string };

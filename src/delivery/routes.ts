@@ -12,6 +12,7 @@ import { renderInvitation } from '../invitations/service.ts';
 import type { InvitationsService } from '../invitations/service.ts';
 import { mediaLinks, safeEqual } from './media.ts';
 import { receiptEvents } from './policy.ts';
+import { deliveryDisplay, wassengerLabels } from './status.ts';
 import type { DeliverySettings } from './settings.ts';
 import { deliveryContext, DeliveryInputError } from './worker.ts';
 import type { DeliveryRepository } from './worker.ts';
@@ -35,7 +36,8 @@ export function deliveryRoutes(deps: DeliveryUi & {
 
   router.post('/webhooks/wassenger', (request, response, next) => {
     if (!settings.provider) return response.sendStatus(404);
-    if (!safeEqual(request.get('X-Dinner-Dance-Webhook-Secret') ?? '', settings.webhookSecret)) return response.sendStatus(401);
+    const secret = request.get('X-Dinner-Dance-Webhook-Secret') ?? request.query.secret;
+    if (typeof secret !== 'string' || !safeEqual(secret, settings.webhookSecret)) return response.sendStatus(401);
     next();
   }, json({limit:'1mb'}), async (request, response) => {
     const device = settings.provider!.device;
@@ -102,7 +104,7 @@ export function deliveryRoutes(deps: DeliveryUi & {
     const [review, recipients, history] = await Promise.all([invitations.review(), repository.testRecipients(), repository.testHistory()]);
     return response.status(error ? 422 : 200).render('test-sends', { csrf: request.session?.csrf, error, recipients, history,
       mode:settings.mode, template:review.template, version:review.version, key:randomUUID(), queued:request.query.queued === '1',
-      deliveryLabels, displayTime:deliveryTime });
+      deliveryLabels, deliveryDisplay, wassengerLabels, displayTime:deliveryTime });
   }
   return router;
 }

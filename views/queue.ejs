@@ -48,18 +48,31 @@
         <p class="muted"><%= attempted %> of <%= activeJobs.length %> attempted in this batch</p>
         <progress class="batch-progress" value="<%= attempted %>" max="<%= activeJobs.length %>" aria-label="Batch progress"></progress>
       <% } %>
-      <dl class="queue-counts">
-        <% for (const status of ['queued', 'submitted', 'delivered', 'failed', 'review']) { %>
-          <div><dt><%= deliveryLabels[status] %></dt><dd class="count-<%= status %>"><%= counts[status] %></dd></div>
-        <% } %>
-      </dl>
+      <div class="queue-status-summary">
+        <h3>App status</h3>
+        <dl class="queue-counts">
+          <% for (const status of (mode === 'live' ? ['queued', 'submitting', 'submitted', 'failed', 'review'] : ['queued', 'submitted', 'delivered', 'failed', 'review'])) { %>
+            <div><dt><%= deliveryLabels[status] %></dt><dd class="count-<%= status %>"><%= appCounts[status] %></dd></div>
+          <% } %>
+        </dl>
+      </div>
+      <% if (mode === 'live') { %>
+        <div class="queue-status-summary">
+          <h3>Wassenger status</h3>
+          <dl class="queue-counts">
+            <% for (const status of Object.keys(providerCounts)) { %>
+              <div><dt><%= wassengerLabels[status] %></dt><dd class="count-<%= status %>"><%= providerCounts[status] %></dd></div>
+            <% } %>
+          </dl>
+        </div>
+      <% } %>
     </section>
 
     <section class="panel table-panel" aria-label="Staged invitations">
       <div class="table-toolbar">
         <h2>Invitations</h2>
         <form class="queue-search" method="get" action="/queue">
-          <label><span class="visually-hidden">Filter by status</span><select name="view" class="button button-small">
+          <label><span class="visually-hidden">Filter by outcome</span><select name="view" class="button button-small">
             <option value="all" <%= view === 'all' ? 'selected' : '' %>>All statuses</option>
             <% for (const status of Object.keys(counts)) { %>
               <option value="<%= status %>" <%= view === status ? 'selected' : '' %>><%= deliveryLabels[status] %> (<%= counts[status] %>)</option>
@@ -75,14 +88,15 @@
       <% } else { %>
         <div class="table-wrap" role="region" aria-label="Invitations" tabindex="0">
           <table class="queue-table">
-            <thead><tr><th scope="col">Ticket no.</th><th scope="col">Recipient</th><th scope="col">Contact</th><th scope="col">Status</th><th scope="col">Last update</th><th scope="col">Actions</th></tr></thead>
+            <thead><tr><th scope="col">Ticket no.</th><th scope="col">Recipient</th><th scope="col">Contact</th><th scope="col">App status</th><th scope="col">Wassenger status</th><th scope="col">Last update</th><th scope="col">Actions</th></tr></thead>
             <tbody>
               <% for (const row of rows) { %>
                 <tr>
                   <th scope="row"><%= row.ticketNumber %></th>
                   <td><%= row.name %></td>
                   <td><%= row.phone %></td>
-                  <td><span class="status delivery-<%= row.status %>"><%= deliveryLabels[row.status] %></span></td>
+                  <td><span class="status delivery-<%= row.appStatus %>"><%= deliveryLabels[row.appStatus] %></span></td>
+                  <td><%- include('wassenger-status', { provider: row.provider }) %></td>
                   <td><time datetime="<%= row.updatedAt.toISOString() %>"><%= displayTime.format(row.updatedAt) %></time></td>
                   <td>
                     <div class="row-actions">
@@ -104,7 +118,7 @@
                   </td>
                 </tr>
                 <tr class="queue-preview" id="invitation-<%= row.id %>">
-                  <td colspan="6">
+                  <td colspan="7">
                     <div class="invitation-preview">
                       <a href="/files/images/<%= row.imageId %>" target="_blank" rel="noopener" aria-label="Open saved ticket <%= row.ticketNumber %> image">
                         <img loading="lazy" src="/files/images/<%= row.imageId %>" alt="Ticket <%= row.ticketNumber %>">

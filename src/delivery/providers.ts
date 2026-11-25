@@ -1,4 +1,5 @@
-import { isDelivered, isProviderId, record, retryDelay } from './policy.ts';
+import { isProviderId, record, retryDelay, wassengerStatus } from './policy.ts';
+import type { WassengerStatus } from './policy.ts';
 import type { Invitation } from '../invitations/service.ts';
 import type { mediaLinks } from './media.ts';
 
@@ -10,13 +11,13 @@ export type ProviderConfig = {
 };
 
 export type Submission =
-  | {status: 'submitted'; id: string; alias: string | null}
+  | {status: 'submitted'; id: string; alias: string | null; providerStatus: WassengerStatus}
   | {status: 'delivered'}
   | {status: 'throttled'; delay: number}
   | {status: 'failed' | 'review'; note: string};
 
 export type ProviderLookup = { id: string | null; reference: string; phone: string };
-export type ProviderObservation = { id: string; alias: string | null; status: 'delivered' | 'failed' | null };
+export type ProviderObservation = { id: string; alias: string | null; status: WassengerStatus | null };
 
 export interface DeliveryProvider {
   send(invitation: Invitation, reference: string): Promise<Submission>;
@@ -59,7 +60,8 @@ export function wassengerProvider(settings: ProviderConfig, links: ReturnType<ty
         if (!response.ok) return { status: 'review', note: `Wassenger returned HTTP ${response.status}. Check the attempt before resending.` };
         const data = record(await response.json());
         if (!isProviderId(data.id)) return { status: 'review', note: 'Wassenger did not return a message ID. Check the attempt before resending.' };
-        return { status: 'submitted', id: data.id, alias: isProviderId(data.wid) ? data.wid : null };
+        return { status: 'submitted', id: data.id, alias: isProviderId(data.wid) ? data.wid : null,
+          providerStatus: wassengerStatus(data.ack, data.deliveryStatus, data.status) ?? 'accepted' };
       } catch {
         return { status: 'review', note: 'The Wassenger response could not be confirmed. Check the attempt before resending.' };
       }
@@ -75,8 +77,7 @@ export function wassengerProvider(settings: ProviderConfig, links: ReturnType<ty
         const result: unknown = await response.json();
         const data = id ? record(result) : exactMatch(result, reference, phone, settings.device);
         if (!isProviderId(data.id) || (id && id !== data.id)) return {};
-        const status = isDelivered(data.deliveryStatus) || isDelivered(data.ack) ? 'delivered' :
-          data.deliveryStatus === 'failed' || data.status === 'failed' ? 'failed' : null;
+        const status = wassengerStatus(data.ack, data.deliveryStatus, data.status);
         return { observation: {id:data.id, alias:isProviderId(data.wid) ? data.wid : null, status} };
       } catch { return {}; }
     },
