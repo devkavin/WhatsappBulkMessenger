@@ -21,13 +21,20 @@ test('reviews, edits, stages and withdraws invitations through authenticated for
   assert.match(original, /name="ticket" value="0042" checked/);
   assert.equal(original.includes('name="ticket" value="0043"'), false);
 
+  const editor = await (await fetch(`${base}/recipients?edit=1`, { headers })).text();
+  assert.match(editor, /WhatsApp preview/);
+  assert.match(editor, /class="message-preview-image" src="\/files\/images\/[^"\s]+" alt="Ticket 0042"/);
+  assert.match(editor, /data-message-preview data-ticket-number="0042">You’re invited to the Dinner Dance! Ticket 0042\.<\/p>/);
+
   async function post(path: string, entries: Record<string, string>) {
     return fetch(`${base}${path}`, { method: 'POST', redirect: 'manual', headers, body: new URLSearchParams(entries) });
   }
 
   const badEdit = await post('/recipients/message', { _csrf: token, template: 'Hello {{name}}.' });
   assert.equal(badEdit.status, 422);
-  assert.match(await badEdit.text(), /only supported variable/);
+  const invalidEditor = await badEdit.text();
+  assert.match(invalidEditor, /only supported variable/);
+  assert.match(invalidEditor, /data-message-preview data-ticket-number="0042">Hello \{\{name\}\}\.<\/p>/);
   const edit = await post('/recipients/message', { _csrf: token, template: 'See you there! Ticket {{ticket_number}}.' });
   assert.equal(edit.status, 303);
   const page = await (await fetch(`${base}/recipients`, { headers })).text();

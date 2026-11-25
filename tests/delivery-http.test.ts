@@ -136,13 +136,19 @@ test('shows a matched Wassenger webhook separately from the app submission', asy
   };
   const before = await page('/test-sends');
   assert.match(before, /App status[\s\S]*Wassenger status[\s\S]*Submitted[\s\S]*Queued/);
+  assert.match(before, /data-status-refresh="\/test-sends\/status"/);
   const hook = await fetch(`${base}/webhooks/wassenger?${new URLSearchParams({secret:settings.webhookSecret})}`, {method:'POST',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'message:out:new', device:{id:'test-device'}, data:{id:'test-provider-id', ack:'delivered'}}) });
   assert.equal(hook.status, 204);
   const after = await page('/test-sends');
   assert.match(after, /Submitted[\s\S]*Delivered[\s\S]*message:out:new/);
   assert.doesNotMatch(after, new RegExp(settings.webhookSecret));
+  const history = await page('/test-sends/status');
+  assert.match(history, /data-status-region="test-history"[\s\S]*Delivered[\s\S]*message:out:new/);
+  assert.doesNotMatch(history, /<form/);
+  assert.equal((await fetch(`${base}/test-sends/status`, {redirect:'manual'})).status, 303);
   const queue = await page('/queue?view=delivered');
+  assert.match(queue, /data-status-refresh="\/queue\?view=delivered&amp;q=&amp;page=1"/);
   assert.match(queue, /<h3>App status<\/h3>[\s\S]*<h3>Wassenger status<\/h3>/);
   assert.match(queue, /<td><span class="status delivery-submitted">Submitted<\/span><\/td>[\s\S]*Delivered[\s\S]*message:out:new/);
 });

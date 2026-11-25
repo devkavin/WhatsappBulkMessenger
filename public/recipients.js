@@ -1,14 +1,27 @@
 const recipientList = document.querySelector('[data-recipient-list]');
 if (recipientList) initializeRecipients(recipientList);
 
-const insertTicket = document.querySelector('[data-insert-ticket]');
-if (insertTicket) {
+const messageEditor = document.querySelector('#message-editor');
+if (messageEditor) initializeMessageEditor(messageEditor);
+
+function initializeMessageEditor(editor) {
+  const field = editor.querySelector('#template');
+  const preview = editor.querySelector('[data-message-preview]');
+  const insertTicket = editor.querySelector('[data-insert-ticket]');
+
+  function updatePreview() {
+    const message = field.value.trim().replace(/\{\{\s*ticket_number\s*\}\}/g, () => preview.dataset.ticketNumber);
+    preview.textContent = message || 'Your message will appear here.';
+  }
+
   insertTicket.hidden = false;
+  field.addEventListener('input', updatePreview);
   insertTicket.addEventListener('click', () => {
-    const field = document.querySelector('#template');
     field.setRangeText('{{ticket_number}}', field.selectionStart, field.selectionEnd, 'end');
     field.focus();
+    updatePreview();
   });
+  updatePreview();
 }
 
 function initializeRecipients(workspace) {

@@ -33,6 +33,7 @@ export function deliveryRoutes(deps: DeliveryUi & {
   const context = deliveryContext(settings);
   const links = mediaLinks(deps.origin, deps.secret);
   const router = Router();
+  const historyView = { deliveryLabels, deliveryDisplay, wassengerLabels, displayTime:deliveryTime };
 
   router.post('/webhooks/wassenger', (request, response, next) => {
     if (!settings.provider) return response.sendStatus(404);
@@ -58,6 +59,9 @@ export function deliveryRoutes(deps: DeliveryUi & {
 
   router.use('/test-sends', requireOperator);
   router.get('/test-sends', (request, response) => render(request, response));
+  router.get('/test-sends/status', async (_request, response) => {
+    response.render('test-history', { ...historyView, history:await repository.testHistory() });
+  });
   router.post('/test-sends/recipients', readForm, requireRequestToken, async (request, response) => {
     const name = text(request.body?.name).trim();
     const phone = parsePhoneNumberFromString(text(request.body?.phone).trim(), { defaultCountry:deps.country ?? 'LK', extract:false });
@@ -104,7 +108,7 @@ export function deliveryRoutes(deps: DeliveryUi & {
     const [review, recipients, history] = await Promise.all([invitations.review(), repository.testRecipients(), repository.testHistory()]);
     return response.status(error ? 422 : 200).render('test-sends', { csrf: request.session?.csrf, error, recipients, history,
       mode:settings.mode, template:review.template, version:review.version, key:randomUUID(), queued:request.query.queued === '1',
-      deliveryLabels, deliveryDisplay, wassengerLabels, displayTime:deliveryTime });
+      ...historyView });
   }
   return router;
 }

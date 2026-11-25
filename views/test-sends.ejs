@@ -6,10 +6,11 @@
   <title>Test sends · Dinner Dance</title>
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/test-sends.js" defer></script>
+  <script src="/assets/status-refresh.js" defer></script>
 </head>
 <body>
   <%- include('navigation', {active:'test-sends'}) %>
-  <main class="workspace">
+  <main class="workspace" data-status-refresh="/test-sends/status">
     <div class="page-title">
       <div><h1>Test sends</h1><p class="muted"><%= mode === 'simulate' ? 'Simulation mode' : 'Live Wassenger sender' %></p></div>
       <a class="button" href="/test-sends">Refresh status</a>
@@ -56,26 +57,7 @@
         </form>
       </section>
     </div>
-    <section class="panel test-history" aria-labelledby="test-history-label">
-      <h2 id="test-history-label">Test history</h2>
-      <% if (!history.length) { %><p class="empty-state">Test results will appear here.</p><% } else { %>
-        <div class="table-wrap" role="region" aria-label="Test delivery results" tabindex="0">
-          <table><thead><tr><th scope="col">Recipient</th><th scope="col">Ticket no.</th><th scope="col">Mode</th><th scope="col">App status</th><th scope="col">Wassenger status</th><th scope="col">Last update</th></tr></thead>
-          <tbody><% for (const item of history) { %>
-            <% const { appStatus, provider } = deliveryDisplay(item); %>
-            <tr>
-              <th scope="row"><%= item.name %><div class="muted"><%= item.phone %></div></th>
-              <td><%= item.ticketNumber %></td><td><%= item.mode === 'simulate' ? 'Simulation' : 'Live' %></td>
-              <td><span class="status delivery-<%= appStatus %>"><%= deliveryLabels[appStatus] %></span>
-                <% if (item.note) { %><p class="row-hint"><%= item.note %></p><% } %>
-                <% if (item.reference && item.status === 'review') { %><p class="muted"><code><%= item.reference %></code></p><% } %>
-              </td><td><%- include('wassenger-status', { provider }) %></td>
-              <td><time datetime="<%= item.updatedAt.toISOString() %>"><%= displayTime.format(item.updatedAt) %></time></td>
-            </tr>
-          <% } %></tbody></table>
-        </div>
-      <% } %>
-    </section>
+    <%- include('test-history') %>
   </main>
 </body>
 </html>

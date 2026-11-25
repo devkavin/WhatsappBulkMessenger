@@ -13,25 +13,40 @@
   <main class="workspace" data-recipient-list>
     <div class="page-title">
       <h1>Review recipients</h1>
-      <a class="button" href="/recipients?edit=1#message-editor">Edit message</a>
+      <% if (!edit) { %><a class="button" href="/recipients?edit=1#message-editor">Edit message</a><% } %>
     </div>
 
     <% if (error) { %><p class="notice notice-error" role="alert"><%= error %></p><% } %>
     <% if (notice) { %><p class="notice notice-success" role="status"><%= notice %></p><% } %>
     <% if (edit) { %>
       <section class="panel message-panel" id="message-editor" aria-labelledby="message-editor-label">
-        <h2 id="message-editor-label">Edit invitation</h2>
-        <form class="message-form" action="/recipients/message" method="post">
-          <input type="hidden" name="_csrf" value="<%= csrf %>">
-          <label for="template">Message</label>
-          <p class="muted" id="template-help">Use <code>{{ticket_number}}</code> to include each recipient’s ticket number.</p>
-          <textarea id="template" name="template" maxlength="<%= messageMaxLength %>" aria-describedby="template-help" rows="4" required><%= editorValue %></textarea>
-          <div class="row-actions">
-            <button type="submit" class="button button-primary">Save message</button>
-            <button type="button" class="button" data-insert-ticket hidden>Insert ticket number</button>
-            <a href="/recipients" class="button">Cancel</a>
+        <div class="message-compose">
+          <h2 id="message-editor-label">Edit invitation</h2>
+          <form class="message-form" action="/recipients/message" method="post">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <label for="template">Message</label>
+            <div class="message-input">
+              <textarea id="template" name="template" maxlength="<%= messageMaxLength %>" aria-describedby="template-help" rows="4" required><%= editorValue %></textarea>
+              <div class="message-tools">
+                <button type="button" class="button button-small message-token" data-insert-ticket hidden><span aria-hidden="true">+</span> Insert ticket number</button>
+                <p class="muted" id="template-help"><code>{{ticket_number}}</code> adds each guest’s ticket number.</p>
+              </div>
+            </div>
+            <div class="row-actions message-actions">
+              <a href="/recipients" class="button">Cancel</a>
+              <button type="submit" class="button message-save">Save message</button>
+            </div>
+          </form>
+        </div>
+        <section class="message-preview" aria-labelledby="message-preview-label">
+          <h3 id="message-preview-label">WhatsApp preview</h3>
+          <div class="message-preview-canvas">
+            <div class="message-preview-bubble">
+              <% if (previewImage) { %><img class="message-preview-image" src="/files/images/<%= previewImage %>" alt="Ticket <%= previewTicket %>" loading="lazy"><% } %>
+              <p data-message-preview data-ticket-number="<%= previewTicket %>"><%= previewMessage || 'Your message will appear here.' %></p>
+            </div>
           </div>
-        </form>
+        </section>
       </section>
     <% } %>
 

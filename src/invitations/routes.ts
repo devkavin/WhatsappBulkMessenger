@@ -1,7 +1,7 @@
 import { Router, urlencoded } from 'express';
 import type { Request, Response } from 'express';
 import { requireOperator, requireRequestToken } from '../auth/session.ts';
-import { InvitationInputError, MESSAGE_MAX_LENGTH, StaleReviewError } from './service.ts';
+import { InvitationInputError, MESSAGE_MAX_LENGTH, renderInvitation, StaleReviewError } from './service.ts';
 import type { InvitationsService } from './service.ts';
 import { deliveryLabels } from '../delivery/routes.ts';
 import { deliveryDisplay, wassengerLabels } from '../delivery/status.ts';
@@ -103,10 +103,11 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
     const added = /^\d+$/.test(formText(request.query.added)) ? Number(request.query.added) : null;
     const notice = added === 0 ? 'The selected tickets are already queued.' : added === null ? '' : `${added} ${added === 1 ? 'invitation' : 'invitations'} added to the queue.`;
     const canStart = dashboard?.state === 'waiting' && dashboard.liveReady && counts.queued > 0;
+    const refreshUrl = `/queue?${new URLSearchParams({view, q:search, page:String(page)})}`;
     response.status(error ? 409 : 200).render('queue', {
       csrf:request.session?.csrf, dashboard, counts, canStart, error, mode:delivery?.settings.mode,
       rate:delivery?.settings.perMinute, rows, view, search, page, pages, total:matching.length, notice, displayTime,
-      deliveryLabels, appCounts, providerCounts, wassengerLabels,
+      deliveryLabels, appCounts, providerCounts, wassengerLabels, refreshUrl,
     });
   }
   router.post('/queue/:id/remove', readForm, requireRequestToken, async (request, response) => {
@@ -127,10 +128,15 @@ async function renderReview(
   const review = await service.review();
   const ready = review.rows.filter(row => row.status === 'ready').length;
   const attention = review.rows.filter(row => row.status === 'attention').length;
+  const edit = request.query.edit === '1' || options.editorValue !== undefined;
+  const editorValue = options.editorValue ?? review.template;
+  const previewRow = edit ? review.rows.find(row => row.status === 'ready') : undefined;
+  const previewTicket = previewRow?.contact.ticketNumber ?? '0042';
   response.status(options.status ?? 200).render('recipients', {
     csrf: request.session?.csrf, review, ready, attention,
-    edit: request.query.edit === '1' || options.editorValue !== undefined,
-    editorValue: options.editorValue ?? review.template, messageMaxLength: MESSAGE_MAX_LENGTH,
+    edit, editorValue, messageMaxLength: MESSAGE_MAX_LENGTH,
+    previewTicket, previewImage:previewRow?.images[0]?.id,
+    previewMessage:edit ? renderInvitation(editorValue.trim(), previewTicket) : '',
     error: options.error ?? '', notice: request.query.notice === 'message' ? 'Message updated.' : '',
   });
 }
