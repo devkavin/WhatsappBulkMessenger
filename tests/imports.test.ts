@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { rootCertificates } from 'node:tls';
 import { readConfig } from '../src/config.ts';
 import { parseContacts } from '../src/imports/contacts.ts';
 import { matchImages } from '../src/imports/matches.ts';
@@ -27,6 +28,13 @@ test('uses the default MySQL port and retains certificate verification when TLS 
     host: '::1', port: 3306, user: 'dinner_dance_app', password: 'p@ss:$word#51%/with space', database: 'dinnerdance',
     ssl: { rejectUnauthorized: true },
   });
+});
+
+test('trusts the configured MySQL CA with certificate verification enabled', () => {
+  const ca = rootCertificates[0];
+  const { database } = readConfig({ ...databaseEnv, DB_SSL: 'true', DB_SSL_CA: `\n${ca}\n` });
+  assert.deepEqual(database.ssl, { rejectUnauthorized: true, ca });
+  assert.throws(() => readConfig({ ...databaseEnv, DB_SSL_CA: ca }), /Set DB_SSL to true/);
 });
 
 test('identifies invalid MySQL settings without leaking credentials', () => {

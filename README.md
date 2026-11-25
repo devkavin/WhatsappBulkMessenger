@@ -15,7 +15,8 @@ Set these runtime environment variables in Coolify. Use the hostname from the da
 | `DB_PASSWORD` | The application account's MySQL password. |
 | `DB_PORT` | The internal MySQL port. Defaults to `3306`. |
 | `DB_USER` | The MySQL application username, such as `dinner_dance_app`. |
-| `DB_SSL` | Optional. Set `true` to use MySQL TLS with certificate verification, including when replacing a URL that used `?ssl=true`. Defaults to `false`. |
+| `DB_SSL` | Set `true` when MySQL requires TLS or when replacing a URL that used `?ssl=true`. Defaults to `false`. |
+| `DB_SSL_CA` | Optional PEM CA certificate for a MySQL server that uses a private CA. Set the Coolify value type to **Multiline**. |
 | `APP_ORIGIN` | The app's HTTPS origin, such as `https://tickets.example.com` |
 | `APP_PASSWORD` | The operator's sign-in password, at least 12 characters |
 | `SESSION_SECRET` | A separate randomly generated secret, at least 32 characters |
@@ -23,9 +24,11 @@ Set these runtime environment variables in Coolify. Use the hostname from the da
 | `DELIVERY_MODE` | `simulate` by default. Set `live` only for a deployment connected to Wassenger. |
 | `SEND_PER_MINUTE` | Maximum submissions per minute, from 1 to 8. Defaults to 8. Use a lower value when the sender's capacity is shared with Orbit. |
 
-The `ticket_uploads` volume keeps private image files across redeployments. The Docker image checks `/health` on the app's internal port and records probe errors in Docker's health log. The background worker has no HTTP listener, so its Compose service disables that probe.
+The `ticket_uploads` volume keeps private image files across redeployments. The Docker image checks `/health` on the app's internal port. The worker's Compose health check uses a read-only query to verify MySQL access and the delivery control row. Coolify reports an overall health status for the two containers.
 
-If Coolify shows **Restarting**, open **Runtime Logs** and select the restarting service to find its startup error. For a running but unhealthy `app` container, inspect the Docker health log with `docker inspect --format '{{json .State.Health}}' <app-container>`. [Coolify health checks](https://coolify.io/docs/applications/configuration/health-checks)
+If Coolify shows **Restarting**, open **Runtime Logs** and select the restarting service to find its startup error. For an unhealthy container, inspect the Docker health log with `docker inspect --format '{{json .State.Health}}' <container>`. If opening **Files** or running the worker logs `ECONNREFUSED`, check that MySQL is running, the app shares its Coolify destination network, and `DB_HOST` and `DB_PORT` match the MySQL resource's internal connection details. [Coolify health checks](https://coolify.io/docs/applications/configuration/health-checks)
+
+If the logs show `ER_SECURE_TRANSPORT_REQUIRED`, enable `DB_SSL` and redeploy. If MySQL uses a Coolify-generated certificate, use the CA certificate from the database server's `/data/coolify/ssl/coolify-ca.crt` as `DB_SSL_CA`. For a database managed elsewhere, use the CA supplied by that provider. The app and worker both verify the certificate chain. [Coolify database SSL](https://coolify.io/docs/databases/ssl#trust-the-coolify-ca-certificate)
 
 ## Database setup
 

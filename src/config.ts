@@ -49,9 +49,12 @@ function readDatabaseConfig(env: NodeJS.ProcessEnv) {
 
   const ssl = env.DB_SSL?.trim() || 'false';
   if (ssl !== 'true' && ssl !== 'false') throw new Error('Set DB_SSL to true or false.');
+  const ca = env.DB_SSL_CA?.trim();
+  if (ca && ssl === 'false') throw new Error('Set DB_SSL to true when providing DB_SSL_CA.');
 
   const connection = { host, port, user, password, database };
-  return ssl === 'true' ? { ...connection, ssl: { rejectUnauthorized: true } } : connection;
+  if (ssl === 'false') return connection;
+  return { ...connection, ssl: { rejectUnauthorized: true, ...(ca ? { ca } : {}) } };
 }
 
 function readAppOrigin(value: string): string {
