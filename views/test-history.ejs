@@ -2,19 +2,52 @@
   <h2 id="test-history-label">Test history</h2>
   <% if (!history.length) { %><p class="empty-state">Test results will appear here.</p><% } else { %>
     <div class="table-wrap" role="region" aria-label="Test delivery results" tabindex="0">
-      <table><thead><tr><th scope="col">Recipient</th><th scope="col">Ticket no.</th><th scope="col">Mode</th><th scope="col">App status</th><th scope="col">Wassenger status</th><th scope="col">Last update</th></tr></thead>
-      <tbody><% for (const item of history) { %>
-        <% const { appStatus, provider } = deliveryDisplay(item); %>
-        <tr>
-          <th scope="row"><%= item.name %><div class="muted"><%= item.phone %></div></th>
-          <td><%= item.ticketNumber %></td><td><%= item.mode === 'simulate' ? 'Simulation' : 'Live' %></td>
-          <td><span class="status delivery-<%= appStatus %>"><%= deliveryLabels[appStatus] %></span>
-            <% if (item.note) { %><p class="row-hint"><%= item.note %></p><% } %>
-            <% if (item.reference && item.status === 'review') { %><p class="muted"><code><%= item.reference %></code></p><% } %>
-          </td><td><%- include('wassenger-status', { provider }) %></td>
-          <td><time datetime="<%= item.updatedAt.toISOString() %>"><%= displayTime.format(item.updatedAt) %></time></td>
-        </tr>
-      <% } %></tbody></table>
+      <div class="test-history-list">
+        <div class="test-history-grid test-history-columns" aria-hidden="true">
+          <span>Recipient</span><span>Ticket</span><span>App status</span><span>Wassenger status</span><span>Last update</span>
+        </div>
+        <% for (const item of history) { %>
+          <% const { appStatus, provider } = deliveryDisplay(item); %>
+          <% const responseCode = item.note?.match(/\bHTTP \d{3}\b/)?.[0]; %>
+          <details class="test-history-entry" data-status-detail="<%= item.id %>">
+            <summary class="test-history-grid test-history-row">
+              <span><strong><%= item.name %></strong><span class="test-history-secondary"><%= maskHistoryPhone(item.phone) %></span></span>
+              <span><span class="visually-hidden">Ticket </span><strong><%= item.ticketNumber %></strong><span class="test-history-secondary"><%= item.mode === 'simulate' ? 'Simulation' : 'Live' %></span></span>
+              <span><span class="visually-hidden">App status </span><span class="status delivery-<%= appStatus %>"><%= deliveryLabels[appStatus] %></span>
+                <% if (responseCode) { %><span class="test-history-secondary"><%= responseCode %></span><% } %>
+              </span>
+              <span><span class="visually-hidden">Wassenger status </span>
+                <% if (provider?.status) { %>
+                  <span class="status delivery-<%= provider.status %>"><%= wassengerLabels[provider.status] %></span>
+                  <span class="test-history-secondary"><%= provider.source ?? 'Source not recorded' %></span>
+                <% } else { %>
+                  <span class="<%= provider ? 'status status-neutral' : 'muted' %>"><%= provider ? 'No provider status' : '—' %></span>
+                <% } %>
+              </span>
+              <time datetime="<%= item.updatedAt.toISOString() %>" title="<%= displayTime.format(item.updatedAt) %>">
+                <span class="visually-hidden">Last update </span><strong><%= historyClock.format(item.updatedAt) %></strong>
+                <span class="test-history-secondary"><%= historyDate.format(item.updatedAt) %></span>
+              </time>
+              <span class="test-history-chevron" aria-hidden="true"></span>
+            </summary>
+            <dl class="test-history-detail">
+              <% if (provider?.webhookEvent && provider.webhookReceivedAt) { %>
+                <div>
+                  <dt>Last matched webhook</dt>
+                  <dd><code><%= provider.webhookEvent %></code><time datetime="<%= provider.webhookReceivedAt.toISOString() %>"><%= displayTime.format(provider.webhookReceivedAt) %></time></dd>
+                </div>
+              <% } %>
+              <% if (item.note) { %>
+                <div><dt>App note</dt><dd><%= item.note %></dd></div>
+              <% } %>
+              <% if (item.reference && item.status === 'review') { %>
+                <div><dt>Attempt</dt><dd><code><%= item.reference %></code></dd></div>
+              <% } %>
+              <div><dt>Phone</dt><dd><%= item.phone %></dd></div>
+            </dl>
+          </details>
+        <% } %>
+      </div>
     </div>
   <% } %>
 </section>

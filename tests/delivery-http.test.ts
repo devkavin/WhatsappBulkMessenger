@@ -109,13 +109,15 @@ test('shows a matched Wassenger webhook separately from the app submission', asy
   const now = new Date('2026-11-25T18:00:00.000Z');
   const settings = {mode:'live', binding:'fixture', perMinute:8, webhookSecret:'test-fixture-secret-01234567890123',
     provider:{token:'fixture', device:'test-device', connector:'qr', template:null}} as const;
-  const job = { name:'Test guest', phone:'+94771234567', ticketNumber:'TEST-001', mode:'live', status:'submitted', updatedAt:now,
+  const job = { id:'test-job', name:'Test guest', phone:'+94771234567', ticketNumber:'TEST-001', mode:'live', status:'submitted', updatedAt:now,
     providerStatus:'queued', providerSource:'submission', webhookEvent:null as string | null, webhookReceivedAt:null as Date | null };
+  const reviewJob = { ...job, id:'review-job', ticketNumber:'TEST-002', status:'review', providerStatus:null,
+    note:'Wassenger returned HTTP 502. Check the attempt before resending.', reference:'dd-review-fixture' };
   const staged = { ...job, id:'staged-fixture', imageId:'image-fixture', message:'Your ticket', status:'queued' as const };
   const {base, signIn, invitationsService} = await testSite(t, {settings, repository:{
     async dashboard() { return {state:'waiting', liveReady:true, jobs:[{...job, invitationId:staged.id}]}; },
     async testRecipients() { return []; },
-    async testHistory() { return [job]; },
+    async testHistory() { return [job, reviewJob]; },
     async receipts(_device, receipts, receivedAt) {
       for (const receipt of receipts) {
         if (!receipt.ids.includes('test-provider-id')) continue;
@@ -137,6 +139,11 @@ test('shows a matched Wassenger webhook separately from the app submission', asy
   const before = await page('/test-sends');
   assert.match(before, /App status[\s\S]*Wassenger status[\s\S]*Submitted[\s\S]*Queued/);
   assert.match(before, /data-status-refresh="\/test-sends\/status"/);
+  assert.match(before, /<details class="test-history-entry" data-status-detail="test-job">/);
+  assert.match(before, /\+94 •• ••• 4567/);
+  assert.match(before, /<dt>Phone<\/dt>\s*<dd>\+94771234567<\/dd>/);
+  assert.match(before, /Needs review<\/span>[\s\S]*HTTP 502[\s\S]*No provider status/);
+  assert.match(before, /<\/summary>[\s\S]*Wassenger returned HTTP 502[\s\S]*dd-review-fixture/);
   const hook = await fetch(`${base}/webhooks/wassenger?${new URLSearchParams({secret:settings.webhookSecret})}`, {method:'POST',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'message:out:new', device:{id:'test-device'}, data:{id:'test-provider-id', ack:'delivered'}}) });
   assert.equal(hook.status, 204);
@@ -145,6 +152,7 @@ test('shows a matched Wassenger webhook separately from the app submission', asy
   assert.doesNotMatch(after, new RegExp(settings.webhookSecret));
   const history = await page('/test-sends/status');
   assert.match(history, /data-status-region="test-history"[\s\S]*Delivered[\s\S]*message:out:new/);
+  assert.match(history, /<\/summary>[\s\S]*Last matched webhook[\s\S]*<code>message:out:new<\/code>/);
   assert.doesNotMatch(history, /<form/);
   assert.equal((await fetch(`${base}/test-sends/status`, {redirect:'manual'})).status, 303);
   const queue = await page('/queue?view=delivered');

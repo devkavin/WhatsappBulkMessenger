@@ -23,7 +23,7 @@
       const regions = new Map([...snapshot.querySelectorAll('[data-status-region]')].map(region => [region.dataset.statusRegion, region]));
       for (const region of page.querySelectorAll('[data-status-region]')) {
         const updated = regions.get(region.dataset.statusRegion);
-        if (updated && !region.isEqualNode(updated)) updateRegion(region, updated);
+        if (updated) updateRegion(region, updated);
       }
 
       const filters = page.querySelector('[data-status-filters]');
@@ -46,6 +46,15 @@
     const focused = document.activeElement;
     if (region.contains(focused) && focused.matches('input, select, textarea, button')) return;
 
+    const openDetails = new Set([...region.querySelectorAll('details[data-status-detail][open]')].map(detail => detail.dataset.statusDetail));
+    const focusedDetail = region.contains(focused) && focused.matches('summary') ? focused.parentElement?.dataset.statusDetail : undefined;
+    let updatedSummary;
+    for (const detail of updated.querySelectorAll('details[data-status-detail]')) {
+      if (openDetails.has(detail.dataset.statusDetail)) detail.open = true;
+      if (detail.dataset.statusDetail === focusedDetail) updatedSummary = detail.querySelector('summary');
+    }
+    if (region.isEqualNode(updated)) return;
+
     const consent = region.querySelector('[name="consent"]');
     const updatedConsent = updated.querySelector('[name="consent"]');
     if (consent && updatedConsent) updatedConsent.checked = consent.checked;
@@ -56,7 +65,8 @@
     region.replaceWith(updated);
     if (updatedTable) {
       updatedTable.scrollLeft = scrollLeft;
-      if (table === focused) updatedTable.focus({preventScroll: true});
+      if (table === focused || (focusedDetail && !updatedSummary)) updatedTable.focus({preventScroll: true});
     }
+    updatedSummary?.focus({preventScroll: true});
   }
 })();

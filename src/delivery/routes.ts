@@ -23,6 +23,8 @@ export const deliveryLabels = {
   review: 'Needs review', cancelled: 'Cancelled', removed: 'Removed',
 };
 export const deliveryTime = new Intl.DateTimeFormat('en-LK', {timeZone:'Asia/Colombo', dateStyle:'medium', timeStyle:'short'});
+const historyClock = new Intl.DateTimeFormat('en-US', {timeZone:'Asia/Colombo', hour:'numeric', minute:'2-digit'});
+const historyDate = new Intl.DateTimeFormat('en-US', {timeZone:'Asia/Colombo', month:'short', day:'numeric'});
 const readForm = urlencoded({ extended:false, limit:'16kb' });
 const readImage = multer({ preservePath:true, defParamCharset:'utf8', limits:{files:1, fields:105, fileSize:IMAGE_MAX_BYTES + 1} }).single('image');
 
@@ -33,7 +35,7 @@ export function deliveryRoutes(deps: DeliveryUi & {
   const context = deliveryContext(settings);
   const links = mediaLinks(deps.origin, deps.secret);
   const router = Router();
-  const historyView = { deliveryLabels, deliveryDisplay, wassengerLabels, displayTime:deliveryTime };
+  const historyView = { deliveryLabels, deliveryDisplay, wassengerLabels, displayTime:deliveryTime, historyClock, historyDate, maskHistoryPhone };
 
   router.post('/webhooks/wassenger', (request, response, next) => {
     if (!settings.provider) return response.sendStatus(404);
@@ -111,6 +113,11 @@ export function deliveryRoutes(deps: DeliveryUi & {
       ...historyView });
   }
   return router;
+}
+
+function maskHistoryPhone(phone: string) {
+  const countryCode = parsePhoneNumberFromString(phone)?.countryCallingCode;
+  return `${countryCode ? `+${countryCode} ` : ''}•• ••• ${phone.slice(-4)}`;
 }
 
 function text(value: unknown) { return typeof value === 'string' ? value : ''; }

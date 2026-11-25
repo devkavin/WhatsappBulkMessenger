@@ -215,7 +215,36 @@ tbody th { font-variant-numeric: tabular-nums; }
 .test-recipient-list > li { display:flex; justify-content:space-between; align-items:center; gap:.5rem; border-top:1px solid var(--border); padding:.6rem 0; }
 .test-recipient-list input, .control-check input, .queue-control input { accent-color:var(--accent); }
 .test-history { margin-top:1.25rem; }
-.test-history h2 { margin-bottom:.75rem; }
+.test-history h2 { margin-bottom:.9rem; font-size:clamp(1.25rem, 2vw, 1.65rem); }
+.test-history-list { min-width: 43rem; }
+.test-history-grid {
+  display: grid; align-items: center; gap: .75rem 1rem;
+  grid-template-columns: minmax(8rem, 1.45fr) minmax(5rem, .8fr) minmax(6.5rem, 1fr) minmax(8rem, 1.25fr) minmax(5rem, .85fr) 1.5rem;
+  padding-inline: .75rem;
+}
+.test-history-columns { padding-block: .55rem; border-bottom: 1px solid var(--border); color: var(--muted); font-size: .875rem; font-weight: 650; }
+.test-history-entry + .test-history-entry { border-top: 1px solid #e2e8f0; }
+.test-history-row { min-height: 3.85rem; padding-block: .65rem; list-style: none; cursor: pointer; overflow-wrap: anywhere; }
+.test-history-row::-webkit-details-marker { display: none; }
+.test-history-row:hover { background: #f8fafc; }
+.test-history-row:focus-visible { outline-offset: -2px; border-radius: 6px; }
+.test-history-secondary { display: block; color: var(--muted); font-size: .8125rem; font-weight: 400; line-height: 1.4; }
+.test-history-row time { font-variant-numeric: tabular-nums; }
+.test-history-row .status { border-radius: 999px; padding: .19rem .6rem; }
+.test-history-row .delivery-submitted { background: #e9edf3; color: #344154; }
+.test-history-row .delivery-sent { background: #e1efff; color: #184c96; }
+.test-history-chevron {
+  width: .48rem; height: .48rem; justify-self: center; border: solid var(--muted); border-width: 0 1.75px 1.75px 0;
+  transform: rotate(-45deg);
+}
+.test-history-entry[open] .test-history-chevron { transform: rotate(45deg); }
+.test-history-detail {
+  display: flex; flex-wrap: wrap; gap: .5rem 1.3rem; margin: 0 .75rem .6rem; padding: .65rem .8rem;
+  background: #eef3f9; border-radius: 8px; font-size: .875rem; overflow-wrap: anywhere;
+}
+.test-history-detail > div, .test-history-detail dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .8rem; }
+.test-history-detail dt { font-weight: 650; }
+.test-history-detail dd { margin: 0; color: var(--muted); }
 .test-preview img[hidden] { display:none; }
 
 @media (max-width: 52rem) {
