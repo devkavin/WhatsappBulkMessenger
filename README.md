@@ -18,7 +18,9 @@ Set these runtime environment variables in Coolify. Use the hostname from the da
 | `DELIVERY_MODE` | `simulate` by default. Set `live` only for a deployment connected to Wassenger. |
 | `SEND_PER_MINUTE` | Maximum submissions per minute, from 1 to 8. Defaults to 8. Use a lower value when the sender's capacity is shared with Orbit. |
 
-The app accepts a percent-encoded username and password. The `ticket_uploads` volume keeps private image files across redeployments. The `/health` endpoint checks that the web process is running.
+The app accepts a percent-encoded username and password. The `ticket_uploads` volume keeps private image files across redeployments. The Docker image checks `/health` on the app's internal port and records probe errors in Docker's health log. The background worker has no HTTP listener, so its Compose service disables that probe.
+
+If Coolify shows **Restarting**, open **Runtime Logs** and select the restarting service to find its startup error. For a running but unhealthy `app` container, inspect the Docker health log with `docker inspect --format '{{json .State.Health}}' <app-container>`. [Coolify health checks](https://coolify.io/docs/applications/configuration/health-checks)
 
 ## Database setup
 
