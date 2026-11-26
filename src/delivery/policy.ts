@@ -21,8 +21,9 @@ export function receiptEvents(body: unknown, device: string): DeliveryReceipt[] 
     if (sender !== device) continue;
     const name = event.event;
     if (name !== 'message:out:failed' && name !== 'message:out:ack' && name !== 'message:out:new') continue;
-    const status = name === 'message:out:failed' ? 'failed' :
-      wassengerStatus(event.ack, data.ack, data.deliveryStatus, data.status) ?? (name === 'message:out:new' ? 'sent' : null);
+    const observation = wassengerStatus(event.ack, data.ack, data.deliveryStatus, data.status);
+    const status = name === 'message:out:failed' && observation !== 'sent' && observation !== 'delivered' ? 'failed' :
+      observation ?? (name === 'message:out:new' ? 'sent' : null);
     const ids = [...new Set([event.entityId, data.id, data.wid].filter(isProviderId))];
     const value = data.reference ?? event.reference;
     const reference = typeof value === 'string' && /^dd-[\da-f-]{36}$/.test(value) ? value : null;
@@ -33,14 +34,14 @@ export function receiptEvents(body: unknown, device: string): DeliveryReceipt[] 
 
 export function wassengerStatus(...values: unknown[]): WassengerStatus | null {
   if (values.some(isDelivered)) return 'delivered';
+  if (values.includes('sent') || values.includes('revoked')) return 'sent';
   if (values.includes('failed')) return 'failed';
-  if (values.includes('sent')) return 'sent';
   if (values.includes('queued')) return 'queued';
   return null;
 }
 
 export function isDelivered(ack: unknown) {
-  return ack === 'delivered' || ack === 'received' || ack === 'read' || ack === 'played' || ack === 'viewed';
+  return ack === 'delivered' || ack === 'received' || ack === 'read' || ack === 'readed' || ack === 'played' || ack === 'viewed';
 }
 
 export function isProviderId(value: unknown): value is string {

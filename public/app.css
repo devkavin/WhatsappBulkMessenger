@@ -323,3 +323,9 @@ tbody th { font-variant-numeric: tabular-nums; }
   .review-files, .queue-summary, .staging-bar { align-items: flex-start; flex-wrap: wrap; }
   .search-control { flex-basis: 100%; }
 }
+.recovery-attempts {
+  display: grid;
+  gap: 0.5rem;
+  max-block-size: 21rem;
+  overflow: auto;
+}

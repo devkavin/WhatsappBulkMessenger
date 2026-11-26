@@ -3,7 +3,8 @@ import type { WassengerStatus } from './policy.ts';
 import type { Invitation } from '../invitations/service.ts';
 import type { mediaLinks } from './media.ts';
 
-const MESSAGES_URL = 'https://api.wassenger.com/v1/messages';
+const API_URL = 'https://api.wassenger.com/v1';
+const MESSAGES_URL = `${API_URL}/messages`;
 const TICKET_FIELD = '{{ticket_number}}';
 export type ProviderConfig = {
   token: string; device: string; connector: 'business' | 'qr';
@@ -18,6 +19,15 @@ export type Submission =
 
 export type ProviderLookup = { id: string | null; reference: string; phone: string };
 export type ProviderObservation = { id: string; alias: string | null; status: WassengerStatus | null };
+export type WassengerQueue = { status: string; size: number };
+export type RecoveryStatus = WassengerStatus | 'cleared' | 'missing' | 'unknown';
+
+export interface WassengerRecoveryProvider {
+  queueStatus(): Promise<WassengerQueue>;
+  recoveryStatuses(attempts: ProviderLookup[]): Promise<Map<string, RecoveryStatus>>;
+}
+
+export class WassengerLookupError extends Error {}
 
 export interface DeliveryProvider {
   send(invitation: Invitation, reference: string): Promise<Submission>;
@@ -30,9 +40,55 @@ export function renderApprovedBody(body: string, ticket: string) {
   return body.replace(TICKET_FIELD, () => ticket);
 }
 
-export function wassengerProvider(settings: ProviderConfig, links: ReturnType<typeof mediaLinks>, request = fetch): DeliveryProvider {
+export function wassengerProvider(settings: ProviderConfig, links: ReturnType<typeof mediaLinks>, request = fetch): DeliveryProvider & WassengerRecoveryProvider {
   const headers = { Token: settings.token, 'Content-Type': 'application/json' };
+
+  async function read(url: string, subject: string, signal: AbortSignal): Promise<unknown> {
+    try {
+      const response = await request(url, { headers, redirect:'error', signal });
+      if (!response.ok) throw new WassengerLookupError(`Could not check ${subject} in Wassenger (HTTP ${response.status}). Try again.`);
+      return await response.json();
+    } catch (error) {
+      if (error instanceof WassengerLookupError) throw error;
+      throw new WassengerLookupError(`Could not check ${subject} in Wassenger. Try again.`);
+    }
+  }
+
   return {
+    async queueStatus() {
+      const payload = await read(`${API_URL}/devices/${encodeURIComponent(settings.device)}/queue`, 'the sender queue', AbortSignal.timeout(8000));
+      const {status, size} = record(record(payload).queue);
+      if (typeof status !== 'string' || !status || typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) {
+        throw new WassengerLookupError('Wassenger did not return a valid queue size. Try again.');
+      }
+      return {status, size};
+    },
+    async recoveryStatuses(attempts) {
+      const statuses = new Map<string, RecoveryStatus>();
+      const signal = AbortSignal.timeout(12_000);
+      // Keep URLs short and leave room to detect duplicate references without mistaking a full page for missing records.
+      const batchSize = 25;
+      for (let offset = 0; offset < attempts.length; offset += batchSize) {
+        const batch = attempts.slice(offset, offset + batchSize);
+        const query = new URLSearchParams({device:settings.device, status:'any', size:'100', reference:batch.map(row => row.reference).join(',')});
+        const payload = await read(`${MESSAGES_URL}?${query}`, 'message history', signal);
+        if (!Array.isArray(payload) || payload.length >= 100) {
+          throw new WassengerLookupError('Wassenger did not return complete message history. Try again.');
+        }
+        const rows = payload.map(record);
+        const expected = new Set(batch.map(attempt => attempt.reference));
+        if (rows.some(row => typeof row.reference !== 'string' || !expected.has(row.reference))) {
+          throw new WassengerLookupError('Wassenger returned unmatched message history. Try again.');
+        }
+        for (const attempt of batch) {
+          const matches = rows.filter(row => row.reference === attempt.reference);
+          const [row] = matches;
+          statuses.set(attempt.reference, !row ? 'missing' : matches.length === 1 && isProviderId(row.id) &&
+            (!attempt.id || attempt.id === row.id) && matchesRecipient(row, attempt.phone, settings.device) ? recoveryStatus(row) : 'unknown');
+        }
+      }
+      return statuses;
+    },
     async send(invitation, reference) {
       const url = links.forImage(invitation.imageId);
       const envelope = { device: settings.device, phone: invitation.phone, reference };
@@ -88,9 +144,19 @@ function exactMatch(value: unknown, reference: string, phone: string, device: st
   const object = record(value);
   const items = Array.isArray(value) ? value : object.data ?? object.items ?? object.messages;
   if (!Array.isArray(items)) return {};
-  const matches = items.map(record).filter(row => {
-    const sender = record(row.device).id ?? row.device;
-    return row.reference === reference && row.phone === phone && (!sender || sender === device);
-  });
+  const matches = items.map(record).filter(row => row.reference === reference && matchesRecipient(row, phone, device));
   return matches.length === 1 ? matches[0] : {};
+}
+
+function matchesRecipient(row: Record<string, unknown>, phone: string, device: string) {
+  const sender = record(row.device).id ?? row.device;
+  return row.phone === phone && (!sender || sender === device);
+}
+
+function recoveryStatus(row: Record<string, unknown>): RecoveryStatus {
+  const status = wassengerStatus(row.ack, row.deliveryStatus, row.status);
+  if (status === 'sent' || status === 'delivered') return status;
+  if (row.status === 'processing' || row.deliveryStatus === 'processing') return 'unknown';
+  if (row.status === 'removed' || row.status === 'expired' || row.deliveryStatus === 'cancelled') return 'cleared';
+  return status ?? 'unknown';
 }

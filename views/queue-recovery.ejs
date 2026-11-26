@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wassenger queue · WaBulk</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/queue.js" defer></script>
+</head>
+<body>
+  <%- include('navigation', { active:'queue' }) %>
+  <main class="workspace">
+    <div class="page-title">
+      <h1><%= eventName ? `${eventName} · Wassenger queue` : 'Wassenger queue' %></h1>
+      <div class="row-actions">
+        <a href="/queue" class="button">Back to event queue</a>
+        <form action="/queue/wassenger" method="post">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
+          <button type="submit" class="button">Check again</button>
+        </form>
+      </div>
+    </div>
+    <% if (error) { %><p class="notice notice-error" role="alert"><%= error %></p><% } %>
+    <% if (queue) { %>
+      <section class="panel queue-dashboard" aria-labelledby="sender-queue">
+        <h2 id="sender-queue">Sender queue</h2>
+        <p><strong><%= queue.size %></strong> <%= queue.size === 1 ? 'message' : 'messages' %> queued · <%= queue.status %></p>
+        <p class="muted">Checked <%= displayTime.format(checkedAt) %></p>
+        <% if (queue.size > 0) { %><p>Wait for Wassenger’s queue to empty before continuing from the last sent ticket.</p>
+        <% } else if (queue.status !== 'active') { %><p>Wassenger’s queue must be active before sending can continue.</p>
+        <% } else if (!preview && !error) { %><p>Pause an active event batch to review the remaining invitations.</p><% } %>
+      </section>
+    <% } %>
+    <% if (preview) { %>
+      <section class="panel queue-dashboard" aria-labelledby="resend-heading">
+        <h2 id="resend-heading">Remaining invitations</h2>
+        <% if (preview.lastSent) { %><p>Last confirmed sent ticket in batch order <strong><%= preview.lastSent.ticketNumber %></strong></p>
+        <% } else { %><p>No sent tickets were confirmed in this batch.</p><% } %>
+        <% if (preview.queuedCount) { %>
+          <p><%= preview.queuedCount %> <%= preview.queuedCount === 1 ? 'invitation still queued in the app' : 'invitations still queued in the app' %> after this point.</p>
+        <% } %>
+        <% if (preview.queuedBefore) { %>
+          <p>Some invitations are still queued before the last confirmed send. Review the event queue before continuing.</p>
+        <% } else if (preview.candidates.length || preview.queuedCount) { %>
+          <p>The event will resume and send any selected retries and the invitations still queued in the app in batch order.</p>
+          <form action="/queue/recovery" method="post">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <input type="hidden" name="runId" value="<%= runId %>">
+            <input type="hidden" name="lastSent" value="<%= preview.lastSent?.id ?? '' %>">
+            <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
+            <% if (preview.candidates.length) { %>
+            <fieldset class="recovery-attempts">
+              <legend><%= preview.candidates.length %> <%= preview.candidates.length === 1 ? 'invitation' : 'invitations' %> available to resend</legend>
+              <% for (const {job, reference, missing} of preview.candidates) { %>
+                <label><input type="checkbox" name="attempt" value="<%= reference %>" <%= missing ? 'data-missing-attempt' : 'checked' %>>
+                  Ticket <%= job.ticketNumber %><% if (job.name) { %> · <%= job.name %><% } %>
+                  <span class="muted">· <%= missing ? 'Attempt missing from Wassenger history' : 'Cleared in Wassenger' %></span>
+                </label>
+              <% } %>
+            </fieldset>
+            <% if (preview.candidates.some(candidate => candidate.missing)) { %>
+              <p class="muted">Wassenger no longer lists some attempts. Select those only if you verified they were cleared before sending.</p>
+              <button class="button button-small" type="button" data-select-missing hidden>Select missing attempts</button>
+            <% } %>
+            <% } %>
+            <p><label><input type="checkbox" name="confirm" value="yes" required> WhatsApp is connected<%= preview.candidates.length ? ' and I verified that any selected retries were cleared before sending' : '' %>.</label></p>
+            <button type="submit" class="button button-primary">Continue from last sent</button>
+          </form>
+        <% } else { %><p>No invitations are ready to send after the last confirmed send.</p><% } %>
+        <% if (preview.review.length) { %>
+          <details><summary><%= preview.review.length %> <%= preview.review.length === 1 ? 'invitation needs' : 'invitations need' %> review</summary>
+            <p>Check the prior send in Wassenger before retrying these tickets.</p>
+            <ul><% for (const job of preview.review) { %><li>Ticket <%= job.ticketNumber %></li><% } %></ul>
+          </details>
+        <% } %>
+      </section>
+    <% } %>
+  </main>
+</body>
+</html>

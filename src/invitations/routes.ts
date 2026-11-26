@@ -5,6 +5,9 @@ import { InvitationInputError, MESSAGE_MAX_LENGTH, renderInvitation, StaleReview
 import type { InvitationsService } from './service.ts';
 import { deliveryDisplay, deliveryView } from '../delivery/status.ts';
 import type { DeliveryUi } from '../delivery/routes.ts';
+import { WassengerLookupError } from '../delivery/providers.ts';
+import type { WassengerQueue } from '../delivery/providers.ts';
+import { recoveryLookups, recoveryPreview } from '../delivery/recovery.ts';
 import { deliveryContext, DeliveryInputError } from '../delivery/worker.ts';
 import { EventConflictError, eventIdFrom } from '../events/model.ts';
 import type { EventsRepository, InvitationEvent } from '../events/model.ts';
@@ -50,7 +53,61 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
     await renderQueue(request, response, '', event);
   });
   if (delivery && context) {
-    const {repository, settings} = delivery;
+    const {repository, settings, wassenger} = delivery;
+    if (settings.mode === 'live' && wassenger) {
+      router.post(['/queue/wassenger', '/queue/recovery'], readForm, requireRequestToken, async (request, response) => {
+        const start = /^\/queue\/recovery\/?$/i.test(request.path);
+        const eventId = eventIdFrom(request.body?.eventId);
+        let queue: WassengerQueue | undefined;
+        let preview: ReturnType<typeof recoveryPreview> | undefined;
+        let runId: string | undefined;
+        let eventName: string | undefined;
+        let error = '';
+        let status = 200;
+        try {
+          if (events) {
+            const draft = await service.readDraft();
+            if (!eventId || eventId !== draft.eventId) throw new EventConflictError();
+            eventName = draft.eventName;
+          }
+          if (start && request.body?.confirm !== 'yes') {
+            throw new DeliveryInputError('Review the remaining invitations and confirm that sending can continue.');
+          }
+          queue = await wassenger.queueStatus();
+          const dashboard = await repository.dashboard(context, eventId);
+          runId = dashboard.runId ?? undefined;
+          if (queue.size === 0 && queue.status === 'active' && dashboard.state === 'paused' && runId) {
+            const jobs = dashboard.jobs.filter(job => job.runId === runId);
+            if (jobs.some(job => job.leaseUntil)) {
+              throw new DeliveryInputError('A send is still in progress. Check again when it finishes.');
+            }
+            preview = recoveryPreview(jobs, await wassenger.recoveryStatuses(recoveryLookups(jobs)));
+          }
+          if (start) {
+            const raw = request.body?.attempt;
+            const selected = [...new Set((Array.isArray(raw) ? raw : [raw]).map(formText).filter(Boolean))];
+            const eligible = new Set(preview?.candidates.map(candidate => candidate.reference));
+            const lastSentId = preview?.lastSent?.id ?? null;
+            if (!runId || request.body?.runId !== runId || !preview || request.body?.lastSent !== (lastSentId ?? '') ||
+              preview.queuedBefore || (!selected.length && !preview.queuedCount) || selected.some(ref => !eligible.has(ref))) {
+              throw new DeliveryInputError('The queue or remaining invitations changed. Check Wassenger again before continuing.');
+            }
+            queue = await wassenger.queueStatus();
+            if (queue.size !== 0 || queue.status !== 'active') throw new DeliveryInputError('Wassenger’s queue changed. Check it again before continuing.');
+            await repository.startRecovery(context, eventId, runId, lastSentId, selected, new Date());
+            return response.redirect(303, `/queue?recovery=${selected.length}`);
+          }
+        } catch (failure) {
+          if (!(failure instanceof DeliveryInputError || failure instanceof EventConflictError || failure instanceof WassengerLookupError)) throw failure;
+          error = failure.message;
+          status = failure instanceof WassengerLookupError ? 502 : 409;
+          preview = undefined;
+        }
+        response.status(status).render('queue-recovery', {
+          csrf:request.session?.csrf, eventId, eventName, queue, preview, runId, error, checkedAt:new Date(), ...deliveryView,
+        });
+      });
+    }
     router.post('/queue/control', readForm, requireRequestToken, async (request, response) => {
       try {
         const action = request.body?.action;
@@ -122,7 +179,10 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
     const page = Math.max(1, Math.min(pages, Number.parseInt(formText(request.query.page), 10) || 1));
     const rows = matching.slice((page - 1) * 25, page * 25);
     const added = !archive && /^\d+$/.test(formText(request.query.added)) ? Number(request.query.added) : null;
-    const notice = added === 0 ? 'The selected tickets are already queued.' : added === null ? '' : `${added} ${added === 1 ? 'invitation' : 'invitations'} added to the queue.`;
+    const recoveryCount = !archive && /^\d+$/.test(formText(request.query.recovery)) ? Number(request.query.recovery) : null;
+    const notice = recoveryCount === 0 ? 'Event sending resumed after checking Wassenger.' :
+      recoveryCount ? `Event sending resumed with ${recoveryCount} ${recoveryCount === 1 ? 'invitation' : 'invitations'} queued for resend.` :
+      added === 0 ? 'The selected tickets are already queued.' : added === null ? '' : `${added} ${added === 1 ? 'invitation' : 'invitations'} added to the queue.`;
     const canStart = dashboard?.state === 'waiting' && dashboard.liveReady && counts.queued > 0;
     const queuePath = archive ? `/events/${archive.id}/queue` : '/queue';
     const queueUrl = (targetPage: number) => {

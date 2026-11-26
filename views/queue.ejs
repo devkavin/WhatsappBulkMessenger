@@ -21,11 +21,20 @@
       <% if (eventsEnabled) { %><a class="button" href="/events">Switch event</a><% } %>
       <div data-status-region="queue-controls">
       <% if (dashboard?.state === 'running' || dashboard?.state === 'paused') { %>
-        <form action="/queue/control" method="post">
-          <input type="hidden" name="_csrf" value="<%= csrf %>">
-          <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
-          <button type="submit" name="action" value="<%= dashboard.state === 'running' ? 'pause' : 'resume' %>" class="button"><%= dashboard.state === 'running' ? 'Pause sending' : 'Resume sending' %></button>
-        </form>
+        <div class="row-actions">
+          <form action="/queue/control" method="post">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
+            <button type="submit" name="action" value="<%= dashboard.state === 'running' ? 'pause' : 'resume' %>" class="button"><%= dashboard.state === 'running' ? 'Pause sending' : 'Resume sending' %></button>
+          </form>
+          <% if (dashboard.state === 'paused' && mode === 'live') { %>
+            <form action="/queue/wassenger" method="post">
+              <input type="hidden" name="_csrf" value="<%= csrf %>">
+              <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
+              <button type="submit" class="button button-primary">Continue from last sent</button>
+            </form>
+          <% } %>
+        </div>
       <% } else if (dashboard?.state === 'settings-changed') { %>
         <form action="/queue/control" method="post">
           <input type="hidden" name="_csrf" value="<%= csrf %>">
@@ -70,7 +79,16 @@
           <% if (dashboard?.state === 'settings-changed') { %><p class="muted">Restore the previous settings to continue, or end that batch to review its unsent work.</p><% } %>
           <% if (dashboard && !dashboard.liveReady) { %><p class="muted">Complete a delivered <a href="/test-sends">live test</a> to unlock event sending.</p><% } %>
         </div>
-        <a class="button" href="<%= refreshUrl %>">Refresh status</a>
+        <div class="row-actions">
+          <a class="button" href="<%= refreshUrl %>">Refresh status</a>
+          <% if (!archive && mode === 'live') { %>
+            <form action="/queue/wassenger" method="post">
+              <input type="hidden" name="_csrf" value="<%= csrf %>">
+              <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
+              <button type="submit" class="button">Check Wassenger queue</button>
+            </form>
+          <% } %>
+        </div>
       </div>
       <% const activeJobs = dashboard?.runId ? dashboard.jobs.filter(job => job.runId === dashboard.runId) : []; %>
       <% if (activeJobs.length) { const attempted = activeJobs.filter(job => job.status !== 'queued').length; %>
@@ -89,6 +107,7 @@
       <% if (mode === 'live') { %>
         <div class="queue-status-summary">
           <h3>Wassenger status</h3>
+          <% if (!archive) { %><p class="muted">Recorded invitation statuses. Check the Wassenger queue for the sender’s live count.</p><% } %>
           <dl class="queue-counts">
             <% for (const status of Object.keys(providerCounts)) { %>
               <div><dt><%= wassengerLabels[status] %></dt><dd class="count-<%= status %>"><%= providerCounts[status] %></dd></div>
@@ -136,7 +155,7 @@
                   </a>
                   <div>
                     <strong>Saved invitation</strong><p class="invitation-message"><%= row.message %></p>
-                    <% if (!archive && row.status === 'queued' && !row.job?.reference) { %>
+                    <% if (!archive && row.status === 'queued' && !row.job?.reference && !row.job?.recoveryReference) { %>
                       <form method="post" action="/queue/<%= row.id %>/remove">
                         <input type="hidden" name="_csrf" value="<%= csrf %>">
                         <button class="button button-small" type="submit" aria-label="Remove ticket <%= row.ticketNumber %> from the queue">Remove</button>

@@ -12,12 +12,13 @@ import { renderInvitation } from '../invitations/service.ts';
 import type { InvitationsService } from '../invitations/service.ts';
 import { mediaLinks, safeEqual } from './media.ts';
 import { receiptEvents } from './policy.ts';
+import type { WassengerRecoveryProvider } from './providers.ts';
 import { deliveryDisplay, deliveryView } from './status.ts';
 import type { DeliverySettings } from './settings.ts';
 import { deliveryContext, DeliveryInputError } from './worker.ts';
 import type { DeliveryRepository } from './worker.ts';
 
-export type DeliveryUi = { repository: DeliveryRepository; settings: DeliverySettings; country?: CountryCode };
+export type DeliveryUi = { repository: DeliveryRepository; settings: DeliverySettings; country?: CountryCode; wassenger?: WassengerRecoveryProvider };
 const readForm = urlencoded({ extended:false, limit:'16kb' });
 const readImage = multer({ preservePath:true, defParamCharset:'utf8', limits:{files:1, fields:105, fileSize:IMAGE_MAX_BYTES + 1} }).single('image');
 

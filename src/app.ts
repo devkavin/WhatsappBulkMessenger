@@ -12,6 +12,8 @@ import { invitationRoutes } from './invitations/routes.ts';
 import type { InvitationsService } from './invitations/service.ts';
 import { deliveryRoutes } from './delivery/routes.ts';
 import type { DeliveryUi } from './delivery/routes.ts';
+import { wassengerProvider } from './delivery/providers.ts';
+import { mediaLinks } from './delivery/media.ts';
 import { eventRoutes, findArchivedEvent } from './events/routes.ts';
 import { EventConflictError, eventIdFrom } from './events/model.ts';
 import type { EventsRepository, InvitationEvent } from './events/model.ts';
@@ -100,7 +102,10 @@ export function createApp({ filesService, invitationsService, config, delivery, 
       await renderFiles(request, response, filesService, '', 200, event);
     });
   }
-  app.use(invitationRoutes(invitationsService, delivery, events));
+  const deliveryUi = delivery?.settings.provider && !delivery.wassenger
+    ? { ...delivery, wassenger:wassengerProvider(delivery.settings.provider, mediaLinks(config.origin, config.sessionSecret)) }
+    : delivery;
+  app.use(invitationRoutes(invitationsService, deliveryUi, events));
   if (delivery) app.use(deliveryRoutes({ ...delivery, files:filesService, invitations:invitationsService, origin:config.origin, secret:config.sessionSecret }));
 
   const displayError: ErrorRequestHandler = (error, request, response, next) => {

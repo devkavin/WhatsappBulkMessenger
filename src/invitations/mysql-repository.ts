@@ -52,7 +52,9 @@ export function mysqlInvitationsRepository(pool: Pool): InvitationsRepository {
           UPDATE staged_invitations s SET s.status = 'removed', s.updated_at = ?
           WHERE s.event_id = ? AND s.id = ? AND s.status = 'queued'
           AND NOT EXISTS (SELECT 1 FROM outbound_jobs j WHERE j.invitation_id = s.id
-            AND ((j.lease_until IS NOT NULL AND j.dispatch_at IS NOT NULL) OR (j.mode = 'live' AND j.attempt_count > 0)))
+            AND ((j.lease_until IS NOT NULL AND j.dispatch_at IS NOT NULL) OR
+              (j.mode = 'live' AND (j.attempt_count > 0 OR EXISTS (
+                SELECT 1 FROM outbound_attempts a WHERE a.job_id = j.id AND (a.provider_id IS NOT NULL OR a.provider_status IS NOT NULL))))))
         `, [new Date(), draft.eventId, id]);
         if (result.affectedRows === 0) return false;
         await connection.execute(`UPDATE outbound_jobs SET status = 'cancelled', lease_until = NULL, updated_at = ?

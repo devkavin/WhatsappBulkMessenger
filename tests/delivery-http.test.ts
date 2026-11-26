@@ -6,6 +6,79 @@ import { deliveryWorker } from '../src/delivery/worker.ts';
 import { simulate } from '../src/delivery/providers.ts';
 import { mediaLinks } from '../src/delivery/media.ts';
 
+test('continues the event after checking Wassenger and selecting retries after its last sent ticket', async t => {
+  const settings = {mode:'live', binding:'fixture', perMinute:8, webhookSecret:'',
+    provider:{token:'fixture', device:'test-device', connector:'qr', template:null}} as const;
+  const runId = 'batch-1';
+  const jobs = [
+    ['099', 'old-missing', 'queued', 'submitted'],
+    ['014', 'found-sent', 'queued', 'submitted'],
+    ['003', 'cleared', 'queued', 'submitted'],
+    ['078', 'missing', 'accepted', 'submitted'],
+    ['265', 'ambiguous', 'queued', 'submitted'],
+    ['145', '', null, 'queued'],
+  ].map(([ticketNumber, reference, providerStatus, status]) => ({
+    id:`job-${ticketNumber}`, ticketNumber, reference, status, providerStatus, runId, providerId:`id-${reference}`, phone:'+94771234567',
+  }));
+  const starts: unknown[] = [];
+  let state = 'paused';
+  let size = 128;
+  let refillDuringLookup = false;
+  const {base, signIn} = await testSite(t, {settings, wassenger:{
+    async queueStatus() { return {status:'active', size}; },
+    async recoveryStatuses() {
+      if (refillDuringLookup) size = 1;
+      return new Map([['old-missing','missing'], ['found-sent','sent'], ['cleared','cleared'], ['missing','missing'], ['ambiguous','unknown']]);
+    },
+  }, repository:{
+    async dashboard() { return {state, liveReady:true, jobs, runId}; },
+    async startRecovery(_context, _eventId, run, lastSentId, references) {
+      starts.push({run, lastSentId, references});
+      state = 'running';
+    },
+  }});
+  const headers = await signIn();
+  const queue = await (await fetch(`${base}/queue`, {headers})).text();
+  assert.match(queue, /Check Wassenger queue/);
+  assert.match(queue, /Continue from last sent/);
+  const _csrf = csrf(queue);
+  const post = (path: string, fields: Record<string, string>) => fetch(`${base}/queue/${path}`, {
+    method:'POST', headers, redirect:'manual', body:new URLSearchParams({_csrf, ...fields}),
+  });
+  const busy = await (await post('wassenger', {})).text();
+  assert.match(busy, /128/);
+  assert.doesNotMatch(busy, /Continue from last sent/);
+  size = 0;
+  const preview = await (await post('wassenger', {})).text();
+  assert.match(preview, /Last confirmed sent ticket[^\n]*014/);
+  assert.match(preview, /Continue from last sent/);
+  assert.match(preview, /1 invitation still queued in the app/);
+  assert.match(preview, /name="attempt" value="cleared"/);
+  assert.match(preview, /name="attempt" value="missing" data-missing-attempt>/);
+  assert.doesNotMatch(preview, /name="attempt" value="(?:old-missing|found-sent|ambiguous)"/);
+  assert.deepEqual(starts, []);
+  const lastSent = 'job-014';
+  assert.equal((await post('recovery', {runId, lastSent, attempt:'missing'})).status, 409);
+  assert.equal((await post('recovery', {runId, lastSent, attempt:'found-sent', confirm:'yes'})).status, 409);
+  assert.equal((await post('recovery', {runId, lastSent:'job-099', attempt:'missing', confirm:'yes'})).status, 409);
+  size = 1;
+  assert.equal((await post('recovery', {runId, lastSent, attempt:'missing', confirm:'yes'})).status, 409);
+  size = 0;
+  refillDuringLookup = true;
+  assert.equal((await post('recovery', {runId, lastSent, attempt:'missing', confirm:'yes'})).status, 409);
+  assert.deepEqual(starts, []);
+  size = 0;
+  refillDuringLookup = false;
+  assert.equal((await post('recovery', {runId, lastSent, attempt:'missing', confirm:'yes'})).status, 303);
+  assert.deepEqual(starts, [{run:runId, lastSentId:lastSent, references:['missing']}]);
+  assert.match(await (await fetch(`${base}/queue`, {headers})).text(), /Pause sending/);
+  state = 'paused';
+  const continued = await post('recovery', {runId, lastSent, confirm:'yes'});
+  assert.equal(continued.status, 303);
+  assert.equal(continued.headers.get('location'), '/queue?recovery=0');
+  assert.deepEqual(starts[1], {run:runId, lastSentId:lastSent, references:[]});
+});
+
 test('starts a separate test send without touching staged event invitations', async t => {
   const settings = { mode: 'simulate', binding: 'simulation', perMinute: 8, provider: null, webhookSecret: '' } as const;
   const recipients: object[] = [];

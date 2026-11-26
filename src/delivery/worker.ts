@@ -11,6 +11,10 @@ export type Job = Invitation & {
   status: DeliveryStatus | 'cancelled'; reference: string | null; note: string | null; retryable: number;
   updatedAt: Date;
   providerStatus?: WassengerStatus | null;
+  providerId?: string | null;
+  wasSent?: number;
+  recoveryReference?: string | null;
+  leaseUntil?: Date | null;
   providerSource?: ProviderStatusSource | null;
   webhookEvent?: WassengerWebhookEvent | null;
   webhookReceivedAt?: Date | null;
@@ -27,6 +31,7 @@ export interface DeliveryRepository {
   pause(context: DeliveryContext, paused: boolean, eventId?: number): Promise<void>;
   endChangedBatch(context: DeliveryContext, now: Date, eventId?: number): Promise<void>;
   retry(context: DeliveryContext, id: string, now: Date): Promise<void>;
+  startRecovery(context: DeliveryContext, eventId: number | undefined, runId: string, lastSentId: string | null, references: string[], now: Date): Promise<void>;
   testRecipients(): Promise<TestRecipient[]>;
   saveTestRecipient(name: string, phone: string): Promise<void>;
   removeTestRecipient(id: string, now: Date): Promise<void>;
