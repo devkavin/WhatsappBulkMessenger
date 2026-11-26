@@ -60,13 +60,27 @@ test('requires consent to start a live batch and exposes pause and resume for an
   const settings = {mode:'live', binding:'fixture', perMinute:8, webhookSecret:'test-fixture-secret-01234567890123',
     provider:{token:'fixture', device:'test-device', connector:'qr', template:null}} as const;
   let state = 'waiting';
-  const {base, signIn} = await testSite(t, {settings, repository:{
+  const {base, signIn, invitationsService} = await testSite(t, {settings, repository:{
     async dashboard() { return {state, jobs:[], liveReady:true}; },
     async start(context) { assert.equal(context.device,'test-device'); state = 'running'; },
     async pause(context, paused) { assert.equal(context.binding,'fixture'); state = paused ? 'paused' : 'running'; },
   }});
+  const now = new Date();
+  invitationsService.readQueue = async () => [{ id:'staged-fixture', ticketNumber:'1', name:'Guest', phone:'+94771234567',
+    imageId:'image-fixture', message:'Your ticket', status:'queued', updatedAt:now, createdAt:now }];
   const headers = await signIn();
-  const token = csrf(await (await fetch(`${base}/queue`, {headers})).text());
+  const queue = await (await fetch(`${base}/queue`, {headers})).text();
+  const token = csrf(queue);
+  assert.match(queue, /data-status-region="queue-controls">\s*<button type="button"[^>]*data-confirm-start[^>]*>Start sending<\/button>/);
+  assert.doesNotMatch(queue, /Recipients opted in|type="checkbox" name="consent"/);
+  const confirmation = queue.match(/<dialog[^>]*id="confirm-start"[\s\S]*?<\/dialog>/)?.[0] ?? '';
+  assert.match(confirmation, /Start sending invitations\?/);
+  assert.match(confirmation, /<form action="\/queue\/control" method="post">/);
+  assert.equal(csrf(confirmation), token);
+  assert.match(confirmation, /type="hidden" name="consent" value="yes"/);
+  assert.match(confirmation, /formmethod="dialog"[^>]*autofocus>Cancel/);
+  assert.match(confirmation, /name="action" value="start"[^>]*>Start sending/);
+  assert.match(queue, /<details[^>]*data-status-detail="staged-fixture"[\s\S]*action="\/queue\/staged-fixture\/remove"[\s\S]*<\/details>/);
   const post = (fields: Record<string,string>) => fetch(`${base}/queue/control`, {method:'POST', redirect:'manual', headers,
     body:new URLSearchParams({_csrf:token, ...fields})});
   const missingConsent = await post({action:'start'});
@@ -139,7 +153,8 @@ test('shows a matched Wassenger webhook separately from the app submission', asy
   const before = await page('/test-sends');
   assert.match(before, /App status[\s\S]*Wassenger status[\s\S]*Submitted[\s\S]*Queued/);
   assert.match(before, /data-status-refresh="\/test-sends\/status"/);
-  assert.match(before, /<details class="test-history-entry" data-status-detail="test-job">/);
+  assert.match(before, /delivery-columns[^>]*>\s*<span>Ticket<\/span>\s*<span>Recipient<\/span>/);
+  assert.match(before, /<details[^>]*data-status-detail="test-job">\s*<summary[^>]*>\s*<span>[\s\S]*?<strong>TEST-001<\/strong>/);
   assert.match(before, /\+94 •• ••• 4567/);
   assert.match(before, /<dt>Phone<\/dt>\s*<dd>\+94771234567<\/dd>/);
   assert.match(before, /Needs review<\/span>[\s\S]*HTTP 502[\s\S]*No provider status/);
@@ -158,5 +173,6 @@ test('shows a matched Wassenger webhook separately from the app submission', asy
   const queue = await page('/queue?view=delivered');
   assert.match(queue, /data-status-refresh="\/queue\?view=delivered&amp;q=&amp;page=1"/);
   assert.match(queue, /<h3>App status<\/h3>[\s\S]*<h3>Wassenger status<\/h3>/);
-  assert.match(queue, /<td><span class="status delivery-submitted">Submitted<\/span><\/td>[\s\S]*Delivered[\s\S]*message:out:new/);
+  assert.match(queue, /delivery-columns[^>]*>\s*<span>Ticket<\/span>\s*<span>Recipient<\/span>/);
+  assert.match(queue, /<details[^>]*data-status-detail="staged-fixture"[^>]*>\s*<summary[^>]*>\s*<span>[\s\S]*?<strong>TEST-001<\/strong>[\s\S]*?delivery-submitted">Submitted[\s\S]*?delivery-delivered">Delivered[\s\S]*?<\/summary>[\s\S]*?<code>message:out:new<\/code>[\s\S]*?Saved invitation/);
 });

@@ -1,0 +1,19 @@
+<dl class="delivery-details">
+  <% if (provider?.webhookEvent && provider.webhookReceivedAt) { %>
+    <div>
+      <dt>Last matched webhook</dt>
+      <dd><code><%= provider.webhookEvent %></code></dd>
+    </div>
+    <div>
+      <dt>Received</dt>
+      <dd><time datetime="<%= provider.webhookReceivedAt.toISOString() %>"><%= displayTime.format(provider.webhookReceivedAt) %></time></dd>
+    </div>
+  <% } %>
+  <div><dt>Phone</dt><dd><%= phone %></dd></div>
+  <% if (note) { %>
+    <div><dt>App note</dt><dd><%= note %></dd></div>
+  <% } %>
+  <% if (reference) { %>
+    <div><dt>Attempt</dt><dd><code><%= reference %></code></dd></div>
+  <% } %>
+</dl>

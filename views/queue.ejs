@@ -6,6 +6,7 @@
   <title>Queue · Dinner Dance</title>
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/status-refresh.js" defer></script>
+  <script src="/assets/queue.js" defer></script>
 </head>
 <body>
   <%- include('navigation', { active: 'queue' }) %>
@@ -25,14 +26,26 @@
           <button type="submit" name="action" value="end-changed" class="button">End previous batch</button>
         </form>
       <% } else if (canStart) { %>
-        <form action="/queue/control" method="post" class="queue-control">
-          <input type="hidden" name="_csrf" value="<%= csrf %>">
-          <% if (mode === 'live') { %><label><input type="checkbox" name="consent" value="yes" required> Recipients opted in</label><% } %>
-          <button type="submit" name="action" value="start" class="button button-primary">Start sending</button>
-        </form>
+        <button type="button" class="button button-primary" aria-haspopup="dialog" aria-controls="confirm-start" data-confirm-start>Start sending</button>
       <% } else { %><button type="button" class="button" disabled>Start sending</button><% } %>
       </div>
     </div>
+    <% if (dashboard) { %>
+      <dialog class="confirm-dialog" id="confirm-start" aria-labelledby="confirm-start-title" aria-describedby="confirm-start-description">
+        <h2 id="confirm-start-title"><%= mode === 'live' ? 'Start sending invitations?' : 'Start simulated batch?' %></h2>
+        <p id="confirm-start-description"><%= mode === 'live'
+          ? 'Start sending WhatsApp invitations to the queued recipients. By continuing, you confirm they agreed to receive these messages.'
+          : 'Run the queued invitations in simulation mode. No WhatsApp messages will be sent.' %></p>
+        <form action="/queue/control" method="post">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <% if (mode === 'live') { %><input type="hidden" name="consent" value="yes"><% } %>
+          <div class="row-actions confirm-actions">
+            <button type="submit" formmethod="dialog" class="button" autofocus>Cancel</button>
+            <button type="submit" name="action" value="start" class="button button-primary"><%= mode === 'live' ? 'Start sending' : 'Start simulation' %></button>
+          </div>
+        </form>
+      </dialog>
+    <% } %>
     <% if (error) { %><p class="notice notice-error" role="alert"><%= error %></p><% } %>
     <% if (notice) { %><p class="notice notice-success" role="status"><%= notice %></p><% } %>
     <section class="panel queue-dashboard" aria-label="Queue summary" data-status-region="queue-summary">
@@ -71,9 +84,9 @@
       <% } %>
     </section>
 
-    <section class="panel table-panel" aria-label="Staged invitations">
+    <section class="panel queue-invitations" aria-labelledby="queue-invitations-title">
       <div class="table-toolbar">
-        <h2>Invitations</h2>
+        <h2 id="queue-invitations-title">Invitations</h2>
         <form class="queue-search" method="get" action="/queue">
           <label><span class="visually-hidden">Filter by outcome</span><select name="view" class="button button-small" data-status-filters>
             <option value="all" <%= view === 'all' ? 'selected' : '' %>>All statuses</option>
@@ -91,57 +104,39 @@
         <p class="empty-state table-empty"><%= search ? 'No invitations match that search.' : view === 'removed' ? 'Removed invitations will appear here.' : 'Select recipients to add invitations to the queue.' %></p>
       <% } else { %>
         <div class="table-wrap" role="region" aria-label="Invitations" tabindex="0">
-          <table class="queue-table">
-            <thead><tr><th scope="col">Ticket no.</th><th scope="col">Recipient</th><th scope="col">Contact</th><th scope="col">App status</th><th scope="col">Wassenger status</th><th scope="col">Last update</th><th scope="col">Actions</th></tr></thead>
-            <tbody>
-              <% for (const row of rows) { %>
-                <tr>
-                  <th scope="row"><%= row.ticketNumber %></th>
-                  <td><%= row.name %></td>
-                  <td><%= row.phone %></td>
-                  <td><span class="status delivery-<%= row.appStatus %>"><%= deliveryLabels[row.appStatus] %></span></td>
-                  <td><%- include('wassenger-status', { provider: row.provider }) %></td>
-                  <td><time datetime="<%= row.updatedAt.toISOString() %>"><%= displayTime.format(row.updatedAt) %></time></td>
-                  <td>
-                    <div class="row-actions">
-                      <a href="#invitation-<%= row.id %>">View</a>
-                      <% if (row.status === 'queued' && !row.job?.reference) { %>
-                        <form method="post" action="/queue/<%= row.id %>/remove">
-                          <input type="hidden" name="_csrf" value="<%= csrf %>">
-                          <button class="button button-small" type="submit" aria-label="Remove ticket <%= row.ticketNumber %> from the queue">Remove</button>
-                        </form>
-                      <% } %>
-                      <% if (row.status === 'failed' && row.job?.retryable) { %>
-                        <form method="post" action="/queue/retry">
-                          <input type="hidden" name="_csrf" value="<%= csrf %>">
-                          <input type="hidden" name="job" value="<%= row.job.id %>">
-                          <button class="button button-small" type="submit">Retry</button>
-                        </form>
-                      <% } %>
-                    </div>
-                  </td>
-                </tr>
-                <tr class="queue-preview" id="invitation-<%= row.id %>">
-                  <td colspan="7">
-                    <div class="invitation-preview">
-                      <a href="/files/images/<%= row.imageId %>" target="_blank" rel="noopener" aria-label="Open saved ticket <%= row.ticketNumber %> image">
-                        <img loading="lazy" src="/files/images/<%= row.imageId %>" alt="Ticket <%= row.ticketNumber %>">
-                      </a>
-                      <div>
-                        <strong>Saved invitation</strong><p class="invitation-message"><%= row.message %></p>
-                        <% if (row.job?.note) { %><p class="row-hint"><%= row.job.note %></p><% } %>
-                        <% if (row.job?.reference) { %><p class="muted">Attempt <code><%= row.job.reference %></code></p><% } %>
-                      </div>
-                      <a class="queue-preview-close" href="#">Close preview</a>
-                    </div>
-                  </td>
-                </tr>
-              <% } %>
-            </tbody>
-          </table>
+          <div class="delivery-list">
+            <%- include('delivery-columns') %>
+            <% for (const row of rows) { %>
+              <details class="delivery-entry" data-status-detail="<%= row.id %>" id="invitation-<%= row.id %>">
+                <%- include('delivery-summary', { item:row, appStatus:row.appStatus, provider:row.provider, deliveryMode:row.job?.mode ?? mode, note:row.job?.note }) %>
+                <%- include('delivery-details', { provider:row.provider, phone:row.phone, note:row.job?.note, reference:row.job?.reference }) %>
+                <div class="invitation-preview queue-invitation-preview">
+                  <a href="/files/images/<%= row.imageId %>" target="_blank" rel="noopener" aria-label="Open saved ticket <%= row.ticketNumber %> image">
+                    <img loading="lazy" src="/files/images/<%= row.imageId %>" alt="Ticket <%= row.ticketNumber %>">
+                  </a>
+                  <div>
+                    <strong>Saved invitation</strong><p class="invitation-message"><%= row.message %></p>
+                    <% if (row.status === 'queued' && !row.job?.reference) { %>
+                      <form method="post" action="/queue/<%= row.id %>/remove">
+                        <input type="hidden" name="_csrf" value="<%= csrf %>">
+                        <button class="button button-small" type="submit" aria-label="Remove ticket <%= row.ticketNumber %> from the queue">Remove</button>
+                      </form>
+                    <% } %>
+                    <% if (row.status === 'failed' && row.job?.retryable) { %>
+                      <form method="post" action="/queue/retry">
+                        <input type="hidden" name="_csrf" value="<%= csrf %>">
+                        <input type="hidden" name="job" value="<%= row.job.id %>">
+                        <button class="button button-small" type="submit" aria-label="Retry ticket <%= row.ticketNumber %>">Retry</button>
+                      </form>
+                    <% } %>
+                  </div>
+                </div>
+              </details>
+            <% } %>
+          </div>
         </div>
         <% if (pages > 1) { %>
-          <nav class="pagination review-pagination" aria-label="Queue pages">
+          <nav class="pagination" aria-label="Queue pages">
             <span><%= (page - 1) * 25 + 1 %>–<%= Math.min(page * 25, total) %> of <%= total %></span>
             <div class="row-actions">
               <% if (page > 1) { %><a class="button button-small" href="/queue?view=<%= view %>&amp;q=<%= encodeURIComponent(search) %>&amp;page=<%= page - 1 %>">Previous</a><% } %>

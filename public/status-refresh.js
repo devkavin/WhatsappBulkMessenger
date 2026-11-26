@@ -44,7 +44,7 @@
 
   function updateRegion(region, updated) {
     const focused = document.activeElement;
-    if (region.contains(focused) && focused.matches('input, select, textarea, button')) return;
+    if (region.contains(focused) && focused.matches('input, select, textarea, button, details a')) return;
 
     const openDetails = new Set([...region.querySelectorAll('details[data-status-detail][open]')].map(detail => detail.dataset.statusDetail));
     const focusedDetail = region.contains(focused) && focused.matches('summary') ? focused.parentElement?.dataset.statusDetail : undefined;
@@ -54,10 +54,6 @@
       if (detail.dataset.statusDetail === focusedDetail) updatedSummary = detail.querySelector('summary');
     }
     if (region.isEqualNode(updated)) return;
-
-    const consent = region.querySelector('[name="consent"]');
-    const updatedConsent = updated.querySelector('[name="consent"]');
-    if (consent && updatedConsent) updatedConsent.checked = consent.checked;
 
     const table = region.querySelector('.table-wrap');
     const updatedTable = updated.querySelector('.table-wrap');

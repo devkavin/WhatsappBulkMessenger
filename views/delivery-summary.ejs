@@ -1,0 +1,23 @@
+<summary class="delivery-grid delivery-row">
+  <span><span class="visually-hidden">Ticket </span><strong><%= item.ticketNumber %></strong>
+    <% if (deliveryMode) { %><span class="delivery-secondary"><%= deliveryMode === 'simulate' ? 'Simulation' : 'Live' %></span><% } %>
+  </span>
+  <span><strong><%= item.name %></strong><span class="delivery-secondary"><%= maskDeliveryPhone(item.phone) %></span></span>
+  <span><span class="visually-hidden">App status </span><span class="status delivery-<%= appStatus %>"><%= deliveryLabels[appStatus] %></span>
+    <% const responseCode = note?.match(/\bHTTP \d{3}\b/)?.[0]; %>
+    <% if (responseCode) { %><span class="delivery-secondary"><%= responseCode %></span><% } %>
+  </span>
+  <span><span class="visually-hidden">Wassenger status </span>
+    <% if (provider?.status) { %>
+      <span class="status delivery-<%= provider.status %>"><%= wassengerLabels[provider.status] %></span>
+      <span class="delivery-secondary"><%= provider.source ?? 'Source not recorded' %></span>
+    <% } else { %>
+      <% if (provider) { %><span class="status delivery-no-provider">No provider status</span><% } else { %><span class="muted">—</span><% } %>
+    <% } %>
+  </span>
+  <time datetime="<%= item.updatedAt.toISOString() %>" title="<%= displayTime.format(item.updatedAt) %>">
+    <span class="visually-hidden">Last update </span><strong><%= deliveryClock.format(item.updatedAt) %></strong>
+    <span class="delivery-secondary"><%= deliveryDate.format(item.updatedAt) %></span>
+  </time>
+  <span class="delivery-chevron" aria-hidden="true"></span>
+</summary>

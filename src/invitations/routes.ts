@@ -3,15 +3,11 @@ import type { Request, Response } from 'express';
 import { requireOperator, requireRequestToken } from '../auth/session.ts';
 import { InvitationInputError, MESSAGE_MAX_LENGTH, renderInvitation, StaleReviewError } from './service.ts';
 import type { InvitationsService } from './service.ts';
-import { deliveryLabels } from '../delivery/routes.ts';
-import { deliveryDisplay, wassengerLabels } from '../delivery/status.ts';
+import { deliveryDisplay, deliveryView } from '../delivery/status.ts';
 import type { DeliveryUi } from '../delivery/routes.ts';
 import { deliveryContext, DeliveryInputError } from '../delivery/worker.ts';
 
 const readForm = urlencoded({ extended: false, limit: '512kb', parameterLimit: 10_000 });
-const displayTime = new Intl.DateTimeFormat('en-LK', {
-  timeZone: 'Asia/Colombo', dateStyle: 'medium', timeStyle: 'short',
-});
 
 export function invitationRoutes(service: InvitationsService, delivery?: DeliveryUi) {
   const router = Router();
@@ -106,8 +102,8 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
     const refreshUrl = `/queue?${new URLSearchParams({view, q:search, page:String(page)})}`;
     response.status(error ? 409 : 200).render('queue', {
       csrf:request.session?.csrf, dashboard, counts, canStart, error, mode:delivery?.settings.mode,
-      rate:delivery?.settings.perMinute, rows, view, search, page, pages, total:matching.length, notice, displayTime,
-      deliveryLabels, appCounts, providerCounts, wassengerLabels, refreshUrl,
+      rate:delivery?.settings.perMinute, rows, view, search, page, pages, total:matching.length, notice,
+      ...deliveryView, appCounts, providerCounts, refreshUrl,
     });
   }
   router.post('/queue/:id/remove', readForm, requireRequestToken, async (request, response) => {
