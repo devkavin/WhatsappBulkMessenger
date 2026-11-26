@@ -21,10 +21,11 @@ export type DeliveryContext = Pick<DeliverySettings, 'mode' | 'binding'> & { dev
 export type Dashboard = { state: 'waiting' | 'running' | 'paused' | 'settings-changed'; liveReady: boolean; jobs: Job[]; runId?: string | null };
 
 export interface DeliveryRepository {
-  dashboard(context: DeliveryContext): Promise<Dashboard>;
-  start(context: DeliveryContext, now: Date): Promise<void>;
-  pause(context: DeliveryContext, paused: boolean): Promise<void>;
-  endChangedBatch(context: DeliveryContext, now: Date): Promise<void>;
+  dashboard(context: DeliveryContext, eventId?: number): Promise<Dashboard>;
+  archivedJobs(eventId: number, mode: DeliverySettings['mode']): Promise<Job[]>;
+  start(context: DeliveryContext, now: Date, eventId?: number): Promise<void>;
+  pause(context: DeliveryContext, paused: boolean, eventId?: number): Promise<void>;
+  endChangedBatch(context: DeliveryContext, now: Date, eventId?: number): Promise<void>;
   retry(context: DeliveryContext, id: string, now: Date): Promise<void>;
   testRecipients(): Promise<TestRecipient[]>;
   saveTestRecipient(name: string, phone: string): Promise<void>;

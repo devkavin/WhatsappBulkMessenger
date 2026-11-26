@@ -2,6 +2,8 @@
 
 Import contacts and ticket images in **Files**, review the message and select recipients in **Recipients**, then stage invitations in **Queue**. A separate worker processes a batch after **Start sending**. Use **Test sends** to preview and submit an isolated test and view its delivery history.
 
+Open **Events → Start new event** to archive the current event and begin with an empty contact list, ticket list, and sending queue. Review the pending invitation count and confirm the switch. If a submission is in progress, pause the queue and wait for it to finish. The archived event keeps its tickets and updates delivery statuses as receipts arrive. The new event starts with the default invitation message. Test recipients and sending settings are shared across events.
+
 ## Coolify configuration
 
 Add the project as a Docker Compose application using `compose.yaml`. Run the app and worker on the same Coolify server and destination network as MySQL and connect them to that predefined network. In Coolify's **Domains** settings, route the HTTPS domain to the `app` service on internal port `3100`. The worker uses the same private database and reads from the shared image volume. [Coolify Compose applications](https://coolify.io/docs/applications/builds/docker-compose#configure-public-services) · [Coolify MySQL](https://coolify.io/docs/databases/mysql)
@@ -32,7 +34,7 @@ If the logs show `ER_SECURE_TRANSPORT_REQUIRED`, enable `DB_SSL` and redeploy. I
 
 ## Database setup
 
-Provision the dedicated database and account as an approved administrative operation. Apply [001 Files](db/migrations/001_files.sql), [002 invitation staging](db/migrations/002_invitation_staging.sql), [003 delivery](db/migrations/003_delivery.sql), and [004 Wassenger status](db/migrations/004_wassenger_status.sql) in order on a new database. On an existing deployment with 001–003 applied, review and apply 004 through the administrative connection before deploying the new image. It adds nullable Wassenger status and webhook fields to `outbound_attempts`. The runtime account uses `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on the app's schema.
+Provision the dedicated database and account as an approved administrative operation. Apply [001 Files](db/migrations/001_files.sql), [002 invitation staging](db/migrations/002_invitation_staging.sql), [003 delivery](db/migrations/003_delivery.sql), [004 Wassenger status](db/migrations/004_wassenger_status.sql), and [005 Events](db/migrations/005_events.sql) in order on a new database. For an existing deployment, review and approve the pending SQL for the target database, back up the schema, and stop the old app and worker before applying the missing migrations through the administrative connection. Migration 005 assigns the existing CSV, ticket images, and staged invitations to the initial Dinner Dance event and preserves their delivery records. Deploy the updated app and worker after it succeeds. The runtime account uses `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on the app's schema.
 
 ## Simulation and live verification
 

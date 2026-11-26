@@ -6,7 +6,7 @@ export const DEFAULT_TEMPLATE = 'You’re invited to the Dinner Dance! Ticket {{
 export const MESSAGE_MAX_LENGTH = 2000;
 const TICKET_PLACEHOLDER = /\{\{\s*ticket_number\s*\}\}/g;
 
-export type InvitationDraft = { template: string | null; revision: number };
+export type InvitationDraft = { template: string | null; revision: number; eventId?: number };
 export type Invitation = {
   ticketNumber: string;
   name: string;
@@ -19,8 +19,8 @@ export type StagedInvitation = Invitation & { id: string; status: 'queued' | 're
 
 export interface InvitationsRepository {
   readDraft(): Promise<InvitationDraft>;
-  saveMessage(template: string): Promise<void>;
-  readQueue(): Promise<StagedInvitation[]>;
+  saveMessage(template: string, eventId?: number): Promise<void>;
+  readQueue(eventId?: number): Promise<StagedInvitation[]>;
   stage(invitations: Invitation[], expected: InvitationDraft): Promise<number>;
   remove(id: string): Promise<boolean>;
 }
@@ -46,6 +46,7 @@ type Review = {
   rows: ReviewRow[];
   candidateCount: number;
   version: string;
+  eventId?: number;
 };
 
 export class InvitationsService {
@@ -61,7 +62,7 @@ export class InvitationsService {
     return (await this.load()).review;
   }
 
-  async saveMessage(value: string) {
+  async saveMessage(value: string, eventId?: number) {
     const template = value.replace(/\r\n?/g, '\n').trim();
     if (template.length > MESSAGE_MAX_LENGTH) {
       throw new InvitationInputError(`Keep the message to ${MESSAGE_MAX_LENGTH} characters or fewer.`);
@@ -70,7 +71,7 @@ export class InvitationsService {
     if (literal === template || literal.includes('{{') || literal.includes('}}')) {
       throw new InvitationInputError('Use {{ticket_number}} for the ticket number. It is the only supported variable.');
     }
-    await this.repository.saveMessage(template);
+    await this.repository.saveMessage(template, eventId);
   }
 
   async stage(version: string, submitted: string[] | { bitmap: string }) {
@@ -87,7 +88,8 @@ export class InvitationsService {
     return this.repository.stage(invitations, draft);
   }
 
-  readQueue() { return this.repository.readQueue(); }
+  readDraft() { return this.repository.readDraft(); }
+  readQueue(eventId?: number) { return this.repository.readQueue(eventId); }
 
   async remove(id: string) {
     if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id)) return false;
@@ -97,9 +99,9 @@ export class InvitationsService {
   private async load() {
     for (let attempt = 0; attempt < 3; attempt++) {
       const draft = await this.repository.readDraft();
-      const [files, queue] = await Promise.all([this.files.read(), this.repository.readQueue()]);
+      const [files, queue] = await Promise.all([this.files.read(draft.eventId), this.repository.readQueue(draft.eventId)]);
       const current = await this.repository.readDraft();
-      if (draft.revision === current.revision && draft.template === current.template) {
+      if (draft.revision === current.revision && draft.template === current.template && draft.eventId === current.eventId) {
         return { draft, ...buildReview(files, draft, queue) };
       }
     }
@@ -134,7 +136,8 @@ function buildReview(files: Awaited<ReturnType<FilesService['read']>>, draft: In
       template,
       rows,
       candidateCount: candidates.length,
-      version: digest([draft.revision, template, candidates]),
+      version: digest([draft.eventId, draft.revision, template, candidates]),
+      eventId: draft.eventId,
     },
   };
 }

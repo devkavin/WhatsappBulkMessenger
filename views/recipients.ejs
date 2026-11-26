@@ -10,7 +10,7 @@
 <body>
   <%- include('navigation', { active: 'recipients' }) %>
 
-  <main class="workspace" data-recipient-list>
+  <main class="workspace" data-recipient-list data-event-id="<%= review.eventId ?? '' %>">
     <div class="page-title">
       <h1>Review recipients</h1>
       <% if (!edit) { %><a class="button" href="/recipients?edit=1#message-editor">Edit message</a><% } %>
@@ -23,6 +23,7 @@
         <div class="message-compose">
           <h2 id="message-editor-label">Edit invitation</h2>
           <form class="message-form" action="/recipients/message" method="post">
+            <% if (review.eventId) { %><input type="hidden" name="eventId" value="<%= review.eventId %>"><% } %>
             <input type="hidden" name="_csrf" value="<%= csrf %>">
             <label for="template">Message</label>
             <div class="message-input">

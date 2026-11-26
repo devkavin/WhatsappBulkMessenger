@@ -46,6 +46,8 @@ h2 { font-size: 1.25rem; line-height: 1.3; letter-spacing: -.02em; }
 .page-title { margin-bottom: 1.75rem; }
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 1.25rem; }
 .panel + .panel { margin-top: 1.5rem; }
+.event-form { display: grid; gap: .75rem; justify-items: start; }
+.event-form input[type="text"] { width: min(100%, 25rem); }
 .file-row { border: 1px solid var(--border); border-radius: 8px; padding: .875rem 1rem; margin-top: .9rem; }
 .file-summary { display: flex; align-items: center; gap: 1rem; min-width: 0; }
 .file-summary > div { min-width: 0; overflow-wrap: anywhere; }

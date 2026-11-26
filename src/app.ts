@@ -12,28 +12,33 @@ import { invitationRoutes } from './invitations/routes.ts';
 import type { InvitationsService } from './invitations/service.ts';
 import { deliveryRoutes } from './delivery/routes.ts';
 import type { DeliveryUi } from './delivery/routes.ts';
+import { eventRoutes, findArchivedEvent } from './events/routes.ts';
+import { EventConflictError, eventIdFrom } from './events/model.ts';
+import type { EventsRepository, InvitationEvent } from './events/model.ts';
 
 const PAGE_SIZE = 25;
 const csvUpload = multer({
   preservePath: true,
   defParamCharset: 'utf8',
-  limits: { fileSize: CSV_MAX_BYTES + 1, files: 1, fields: 1, parts: 3 },
+  limits: { fileSize: CSV_MAX_BYTES + 1, files: 1, fields: 2, parts: 4 },
 }).single('csv');
 const imageUpload = multer({
   preservePath: true,
   defParamCharset: 'utf8',
-  limits: { fileSize: IMAGE_MAX_BYTES + 1, files: IMAGE_BATCH_SIZE, fields: 2, parts: IMAGE_BATCH_SIZE + 3 },
+  limits: { fileSize: IMAGE_MAX_BYTES + 1, files: IMAGE_BATCH_SIZE, fields: 3, parts: IMAGE_BATCH_SIZE + 4 },
 }).array('images', IMAGE_BATCH_SIZE);
 
-export function createApp({ filesService, invitationsService, config, delivery }: {
+export function createApp({ filesService, invitationsService, config, delivery, events }: {
   filesService: FilesService;
   invitationsService: InvitationsService;
   config: OperatorConfig;
   delivery?: DeliveryUi;
+  events?: EventsRepository;
 }) {
   const app = express();
   app.set('view engine', 'ejs');
   app.set('views', resolve('views'));
+  app.locals.eventsEnabled = Boolean(events);
   app.use(helmet({ contentSecurityPolicy: { directives: { upgradeInsecureRequests: null, imgSrc: ["'self'", 'data:', 'blob:'] } } }));
   app.use('/assets', express.static(resolve('public'), { index: false }));
   const smallForm = express.urlencoded({ extended: false, limit: '8kb' });
@@ -46,9 +51,11 @@ export function createApp({ filesService, invitationsService, config, delivery }
 
   app.get('/files', (request, response) => renderFiles(request, response, filesService));
   app.post('/files/csv', csvUpload, requireRequestToken, async (request, response) => {
+    const eventId = eventIdFrom(request.body?.eventId);
+    if (events && !eventId) throw new EventConflictError();
     try {
       if (!request.file) throw new ImportError('Choose a CSV file to upload.');
-      await filesService.replaceCsv(request.file.originalname, request.file.buffer);
+      await filesService.replaceCsv(request.file.originalname, request.file.buffer, eventId);
     } catch (error) {
       if (!(error instanceof ImportError)) throw error;
       return renderFiles(request, response, filesService, error.message, 422);
@@ -56,13 +63,15 @@ export function createApp({ filesService, invitationsService, config, delivery }
     response.redirect(303, '/files?notice=csv');
   });
   app.post('/files/images', imageUpload, requireRequestToken, async (request, response) => {
+    const eventId = eventIdFrom(request.body?.eventId);
+    if (events && !eventId) throw new EventConflictError();
     const images = Array.isArray(request.files) ? request.files : [];
     if (!images.length) return uploadError(request, response, 'Choose at least one image to upload.', 422);
     const ticket = typeof request.body?.ticket === 'string' ? request.body.ticket : '';
     if (ticket && (images.length !== 1 || images[0].originalname.replace(/\.[^.]+$/, '') !== ticket)) {
       return uploadError(request, response, 'Choose an image named for the ticket you’re updating.', 422);
     }
-    const result = await filesService.uploadImages(images.map(file => ({ filename: file.originalname, bytes: file.buffer })));
+    const result = await filesService.uploadImages(images.map(file => ({ filename: file.originalname, bytes: file.buffer })), eventId);
     if (wantsJson(request)) return response.json(result);
     if (result.errors.length) {
       const message = result.errors.map(issue => `${issue.filename} — ${issue.reason}`).join(' ');
@@ -83,11 +92,23 @@ export function createApp({ filesService, invitationsService, config, delivery }
     await filesService.removeDraftImage(id);
     response.redirect(303, '/files#images');
   });
-  app.use(invitationRoutes(invitationsService, delivery));
+  if (events) {
+    app.use(eventRoutes(events));
+    app.get('/events/:eventId/files', async (request, response) => {
+      const event = await findArchivedEvent(events, request.params.eventId);
+      if (!event) return response.sendStatus(404);
+      await renderFiles(request, response, filesService, '', 200, event);
+    });
+  }
+  app.use(invitationRoutes(invitationsService, delivery, events));
   if (delivery) app.use(deliveryRoutes({ ...delivery, files:filesService, invitations:invitationsService, origin:config.origin, secret:config.sessionSecret }));
 
   const displayError: ErrorRequestHandler = (error, request, response, next) => {
     if (response.headersSent) return next(error);
+    if (error instanceof EventConflictError) {
+      uploadError(request, response, error.message, 409);
+      return;
+    }
     if (error instanceof multer.MulterError) {
       const message = error.code === 'LIMIT_FILE_SIZE' ? 'An upload exceeds the size limit.' : 'Choose fewer files and try again.';
       uploadError(request, response, message, 422);
@@ -105,8 +126,8 @@ export function createApp({ filesService, invitationsService, config, delivery }
   return app;
 }
 
-async function renderFiles(request: Request, response: Response, service: FilesService, error = '', status = 200) {
-  const state = await service.read();
+async function renderFiles(request: Request, response: Response, service: FilesService, error = '', status = 200, archive?: InvitationEvent) {
+  const state = await service.read(archive?.id);
   const issues = state.csv?.contacts.filter(contact => contact.issues.length) ?? [];
   const attention = state.matches.rows.filter(row => row.status !== 'matched');
   const views = ['all', 'attention', 'unmatched'] as const;
@@ -120,6 +141,7 @@ async function renderFiles(request: Request, response: Response, service: FilesS
 
   response.status(status).render('files', {
     csrf: request.session?.csrf,
+    archive, eventId:state.eventId, filesPath:archive ? `/events/${archive.id}/files` : '/files',
     csv: state.csv,
     issues,
     allCount: state.matches.rows.length,
@@ -137,7 +159,8 @@ async function renderFiles(request: Request, response: Response, service: FilesS
     batchSize: IMAGE_BATCH_SIZE,
     maxImageBytes: IMAGE_MAX_BYTES,
     error,
-    notice: request.query.notice === 'csv' ? 'Contact list updated.' : request.query.notice === 'images' ? 'Ticket images uploaded.' : '',
+    notice: archive ? '' : request.query.notice === 'event' ? 'New event started. Upload the contact list and ticket images.' :
+      request.query.notice === 'csv' ? 'Contact list updated.' : request.query.notice === 'images' ? 'Ticket images uploaded.' : '',
   });
 }
 

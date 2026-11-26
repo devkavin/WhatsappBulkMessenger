@@ -20,6 +20,10 @@
       }
       if (!response.ok) return;
       const snapshot = new DOMParser().parseFromString(await response.text(), 'text/html');
+      if (page.dataset.eventId !== snapshot.querySelector('[data-status-refresh]')?.dataset.eventId) {
+        window.location.reload();
+        return;
+      }
       const regions = new Map([...snapshot.querySelectorAll('[data-status-region]')].map(region => [region.dataset.statusRegion, region]));
       for (const region of page.querySelectorAll('[data-status-region]')) {
         const updated = regions.get(region.dataset.statusRegion);

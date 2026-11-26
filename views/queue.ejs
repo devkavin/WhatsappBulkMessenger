@@ -9,26 +9,35 @@
   <script src="/assets/queue.js" defer></script>
 </head>
 <body>
-  <%- include('navigation', { active: 'queue' }) %>
+  <%- include('navigation', { active: archive ? 'events' : 'queue' }) %>
 
-  <main class="workspace" data-status-refresh="<%= refreshUrl %>">
+  <main class="workspace" data-status-refresh="<%= refreshUrl %>" data-event-id="<%= eventId ?? '' %>">
     <div class="page-title">
-      <h1>Sending queue</h1>
+      <h1><%= archive ? `${archive.name} · Delivery history` : 'Sending queue' %></h1>
+      <% if (archive) { %>
+        <div class="row-actions"><a class="button" href="/events">Past events</a><a class="button" href="/events/<%= archive.id %>/files">Tickets</a></div>
+      <% } else { %>
+      <div class="row-actions">
+      <% if (eventsEnabled) { %><a class="button" href="/events">Start new event</a><% } %>
       <div data-status-region="queue-controls">
       <% if (dashboard?.state === 'running' || dashboard?.state === 'paused') { %>
         <form action="/queue/control" method="post">
           <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
           <button type="submit" name="action" value="<%= dashboard.state === 'running' ? 'pause' : 'resume' %>" class="button"><%= dashboard.state === 'running' ? 'Pause sending' : 'Resume sending' %></button>
         </form>
       <% } else if (dashboard?.state === 'settings-changed') { %>
         <form action="/queue/control" method="post">
           <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
           <button type="submit" name="action" value="end-changed" class="button">End previous batch</button>
         </form>
       <% } else if (canStart) { %>
         <button type="button" class="button button-primary" aria-haspopup="dialog" aria-controls="confirm-start" data-confirm-start>Start sending</button>
       <% } else { %><button type="button" class="button" disabled>Start sending</button><% } %>
       </div>
+      </div>
+      <% } %>
     </div>
     <% if (dashboard) { %>
       <dialog class="confirm-dialog" id="confirm-start" aria-labelledby="confirm-start-title" aria-describedby="confirm-start-description">
@@ -38,6 +47,7 @@
           : 'Run the queued invitations in simulation mode. No WhatsApp messages will be sent.' %></p>
         <form action="/queue/control" method="post">
           <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
           <% if (mode === 'live') { %><input type="hidden" name="consent" value="yes"><% } %>
           <div class="row-actions confirm-actions">
             <button type="submit" formmethod="dialog" class="button" autofocus>Cancel</button>
@@ -51,9 +61,9 @@
     <section class="panel queue-dashboard" aria-label="Queue summary" data-status-region="queue-summary">
       <div class="queue-summary">
         <div>
-          <h2><%= dashboard?.state === 'running' ? 'Sending' : dashboard?.state === 'paused' ? 'Paused' : dashboard?.state === 'settings-changed' ? 'Sending settings changed' : 'Waiting to start' %></h2>
-          <% if (mode === 'simulate') { %><p class="muted">Simulation mode · Up to <%= rate %> submissions per minute</p><% } %>
-          <% if (mode === 'live') { %><p class="muted">Live mode · Up to <%= rate %> submissions per minute</p><% } %>
+          <h2><%= archive ? 'Archived event' : dashboard?.state === 'running' ? 'Sending' : dashboard?.state === 'paused' ? 'Paused' : dashboard?.state === 'settings-changed' ? 'Sending settings changed' : 'Waiting to start' %></h2>
+          <% if (!archive && mode === 'simulate') { %><p class="muted">Simulation mode · Up to <%= rate %> submissions per minute</p><% } %>
+          <% if (!archive && mode === 'live') { %><p class="muted">Live mode · Up to <%= rate %> submissions per minute</p><% } %>
           <% if (dashboard?.state === 'settings-changed') { %><p class="muted">Restore the previous settings to continue, or end that batch to review its unsent work.</p><% } %>
           <% if (dashboard && !dashboard.liveReady) { %><p class="muted">Complete a delivered <a href="/test-sends">live test</a> to unlock event sending.</p><% } %>
         </div>
@@ -67,7 +77,8 @@
       <div class="queue-status-summary">
         <h3>App status</h3>
         <dl class="queue-counts">
-          <% for (const status of (mode === 'live' ? ['queued', 'submitting', 'submitted', 'failed', 'review'] : ['queued', 'submitted', 'delivered', 'failed', 'review'])) { %>
+          <% const summary = mode === 'live' ? ['queued', 'submitting', 'submitted', 'failed', 'review'] : ['queued', 'submitted', 'delivered', 'failed', 'review']; %>
+          <% for (const status of (archive ? [...summary.slice(1), 'cancelled', ...(appCounts.unsent ? ['unsent'] : [])] : summary)) { %>
             <div><dt><%= deliveryLabels[status] %></dt><dd class="count-<%= status %>"><%= appCounts[status] %></dd></div>
           <% } %>
         </dl>
@@ -87,10 +98,16 @@
     <section class="panel queue-invitations" aria-labelledby="queue-invitations-title">
       <div class="table-toolbar">
         <h2 id="queue-invitations-title">Invitations</h2>
-        <form class="queue-search" method="get" action="/queue">
+        <form class="queue-search" method="get" action="<%= queuePath %>">
+          <% if (archive && mode) { %>
+            <label><span class="visually-hidden">Delivery mode</span><select name="mode" class="button button-small">
+              <option value="live" <%= mode === 'live' ? 'selected' : '' %>>Live</option>
+              <option value="simulate" <%= mode === 'simulate' ? 'selected' : '' %>>Simulation</option>
+            </select></label>
+          <% } %>
           <label><span class="visually-hidden">Filter by outcome</span><select name="view" class="button button-small" data-status-filters>
             <option value="all" <%= view === 'all' ? 'selected' : '' %>>All statuses</option>
-            <% for (const status of Object.keys(counts)) { %>
+            <% for (const status of statuses) { %>
               <option value="<%= status %>" <%= view === status ? 'selected' : '' %>><%= deliveryLabels[status] %> (<%= counts[status] %>)</option>
             <% } %>
           </select></label>
@@ -101,7 +118,7 @@
 
       <div data-status-region="queue-results">
       <% if (!rows.length) { %>
-        <p class="empty-state table-empty"><%= search ? 'No invitations match that search.' : view === 'removed' ? 'Removed invitations will appear here.' : 'Select recipients to add invitations to the queue.' %></p>
+        <p class="empty-state table-empty"><%= archive ? 'No invitations in this view.' : search ? 'No invitations match that search.' : view === 'removed' ? 'Removed invitations will appear here.' : 'Select recipients to add invitations to the queue.' %></p>
       <% } else { %>
         <div class="table-wrap" role="region" aria-label="Invitations" tabindex="0">
           <div class="delivery-list">
@@ -116,13 +133,13 @@
                   </a>
                   <div>
                     <strong>Saved invitation</strong><p class="invitation-message"><%= row.message %></p>
-                    <% if (row.status === 'queued' && !row.job?.reference) { %>
+                    <% if (!archive && row.status === 'queued' && !row.job?.reference) { %>
                       <form method="post" action="/queue/<%= row.id %>/remove">
                         <input type="hidden" name="_csrf" value="<%= csrf %>">
                         <button class="button button-small" type="submit" aria-label="Remove ticket <%= row.ticketNumber %> from the queue">Remove</button>
                       </form>
                     <% } %>
-                    <% if (row.status === 'failed' && row.job?.retryable) { %>
+                    <% if (!archive && row.status === 'failed' && row.job?.retryable) { %>
                       <form method="post" action="/queue/retry">
                         <input type="hidden" name="_csrf" value="<%= csrf %>">
                         <input type="hidden" name="job" value="<%= row.job.id %>">
@@ -139,8 +156,8 @@
           <nav class="pagination" aria-label="Queue pages">
             <span><%= (page - 1) * 25 + 1 %>–<%= Math.min(page * 25, total) %> of <%= total %></span>
             <div class="row-actions">
-              <% if (page > 1) { %><a class="button button-small" href="/queue?view=<%= view %>&amp;q=<%= encodeURIComponent(search) %>&amp;page=<%= page - 1 %>">Previous</a><% } %>
-              <% if (page < pages) { %><a class="button button-small" href="/queue?view=<%= view %>&amp;q=<%= encodeURIComponent(search) %>&amp;page=<%= page + 1 %>">Next</a><% } %>
+              <% if (page > 1) { %><a class="button button-small" href="<%= queueUrl(page - 1) %>">Previous</a><% } %>
+              <% if (page < pages) { %><a class="button button-small" href="<%= queueUrl(page + 1) %>">Next</a><% } %>
             </div>
           </nav>
         <% } %>

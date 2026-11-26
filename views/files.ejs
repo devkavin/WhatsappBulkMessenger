@@ -8,12 +8,14 @@
   <script src="/assets/uploads.js" defer></script>
 </head>
 <body>
-  <%- include('navigation', { active: 'files' }) %>
+  <%- include('navigation', { active: archive ? 'events' : 'files' }) %>
 
   <main class="workspace">
     <div class="page-title">
-      <h1>Manage uploads</h1>
-      <a class="button" href="/recipients">Back to recipients</a>
+      <h1><%= archive ? `${archive.name} · Tickets` : 'Manage uploads' %></h1>
+      <% if (archive) { %>
+        <div class="row-actions"><a class="button" href="/events">Past events</a><a class="button" href="/events/<%= archive.id %>/queue">Delivery history</a></div>
+      <% } else { %><a class="button" href="/recipients">Back to recipients</a><% } %>
     </div>
 
     <% if (error) { %><p class="notice notice-error" role="alert"><%= error %></p><% } %>
@@ -26,7 +28,7 @@
           <span class="file-mark" aria-hidden="true"></span>
           <div>
             <strong class="file-name"><%= csv?.filename ?? 'No CSV uploaded' %></strong>
-            <p class="muted"><%= csv ? `${csv.contacts.length} ${csv.contacts.length === 1 ? 'row' : 'rows'} imported` : 'Include Ticket No, Name and Contact.' %></p>
+            <p class="muted"><%= csv ? `${csv.contacts.length} ${csv.contacts.length === 1 ? 'row' : 'rows'} imported` : archive ? '' : 'Include Ticket No, Name and Contact.' %></p>
           </div>
         </div>
         <% if (csv) { %>
@@ -36,14 +38,15 @@
             <span class="status status-success"><span aria-hidden="true">✓</span> Ready</span>
           <% } %>
         <% } %>
-        <form action="/files/csv" method="post" enctype="multipart/form-data">
+        <% if (!archive) { %><form action="/files/csv" method="post" enctype="multipart/form-data">
           <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
           <label class="button file-trigger">
             <input class="visually-hidden" data-auto-submit type="file" name="csv" accept=".csv,text/csv" required>
             <%= csv ? 'Replace CSV' : 'Choose CSV' %>
           </label>
           <noscript><button class="button" type="submit">Upload CSV</button></noscript>
-        </form>
+        </form><% } %>
       </div>
       <% if (issues.length) { %>
         <details class="csv-issues">
@@ -61,8 +64,10 @@
       <h2 id="ticket-images">Ticket images</h2>
       <p class="muted section-caption"><%= matchedCount %> of <%= allCount %> tickets matched</p>
 
+      <% if (!archive) { %>
       <form class="upload-zone" data-bulk-upload data-batch-size="<%= batchSize %>" data-max-file-size="<%= maxImageBytes %>" action="/files/images" method="post" enctype="multipart/form-data">
         <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
         <div class="file-summary">
           <span class="upload-mark" aria-hidden="true">↑</span>
           <div>
@@ -83,15 +88,16 @@
         <ul data-upload-errors></ul>
         <button type="button" class="button button-small" data-refresh hidden>Refresh matches</button>
       </div>
+      <% } %>
 
       <nav class="filter-nav" aria-label="Image views">
-        <a href="/files?view=all#images" <%= view === 'all' ? 'aria-current=page' : '' %>>All tickets <span><%= allCount %></span></a>
-        <a href="/files?view=attention#images" <%= view === 'attention' ? 'aria-current=page' : '' %>>Needs attention <span><%= attentionCount %></span></a>
-        <a href="/files?view=unmatched#images" <%= view === 'unmatched' ? 'aria-current=page' : '' %>>Unmatched uploads <span><%= unmatchedCount %></span></a>
+        <a href="<%= filesPath %>?view=all#images" <%= view === 'all' ? 'aria-current=page' : '' %>>All tickets <span><%= allCount %></span></a>
+        <a href="<%= filesPath %>?view=attention#images" <%= view === 'attention' ? 'aria-current=page' : '' %>>Needs attention <span><%= attentionCount %></span></a>
+        <a href="<%= filesPath %>?view=unmatched#images" <%= view === 'unmatched' ? 'aria-current=page' : '' %>>Unmatched uploads <span><%= unmatchedCount %></span></a>
       </nav>
 
       <% if (!total) { %>
-        <p class="empty-state"><%= view === 'unmatched' ? 'Every uploaded image has a matching ticket number.' : !csv ? 'Upload a CSV to see which tickets need an image.' : 'All tickets have a matching image.' %></p>
+        <p class="empty-state"><%= archive ? 'No tickets in this view.' : view === 'unmatched' ? 'Every uploaded image has a matching ticket number.' : !csv ? 'Upload a CSV to see which tickets need an image.' : 'All tickets have a matching image.' %></p>
       <% } else { %>
         <div class="table-wrap" role="region" aria-label="Ticket image matches" tabindex="0">
           <table>
@@ -108,10 +114,10 @@
                     <td><span class="status status-warning"><span aria-hidden="true">⚠</span> Unmatched</span></td>
                     <td><div class="row-actions">
                       <a href="/files/images/<%= image.id %>" target="_blank" rel="noopener">View image</a>
-                      <form action="/files/images/<%= image.id %>/remove" method="post">
+                      <% if (!archive) { %><form action="/files/images/<%= image.id %>/remove" method="post">
                         <input type="hidden" name="_csrf" value="<%= csrf %>">
                         <button type="submit" class="button button-small" aria-label="Remove <%= image.filename %> from draft">Remove</button>
-                      </form>
+                      </form><% } %>
                     </div></td>
                   </tr>
                 <% } %>
@@ -133,16 +139,17 @@
                           <% for (const image of row.images) { %>
                             <div class="row-actions">
                               <a href="/files/images/<%= image.id %>" target="_blank" rel="noopener"><%= image.filename %></a>
-                              <form action="/files/images/<%= image.id %>/remove" method="post">
+                              <% if (!archive) { %><form action="/files/images/<%= image.id %>/remove" method="post">
                                 <input type="hidden" name="_csrf" value="<%= csrf %>">
                                 <button type="submit" class="button button-small" aria-label="Remove <%= image.filename %> from draft">Remove</button>
-                              </form>
+                              </form><% } %>
                             </div>
                           <% } %>
                         </details>
-                      <% } else if (row.contact.ticketNumber) { %>
+                      <% } else if (!archive && row.contact.ticketNumber) { %>
                         <form action="/files/images" method="post" enctype="multipart/form-data">
                           <input type="hidden" name="_csrf" value="<%= csrf %>">
+                          <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
                           <input type="hidden" name="ticket" value="<%= row.contact.ticketNumber %>">
                           <label class="button button-small file-trigger">
                             <input class="visually-hidden" data-auto-submit type="file" name="images" accept=".png,.jpg,.jpeg,image/png,image/jpeg" aria-label="Add image for ticket <%= row.contact.ticketNumber %>" required>
@@ -150,7 +157,7 @@
                           </label>
                           <noscript><button class="button button-small" type="submit">Upload</button></noscript>
                         </form>
-                      <% } else { %>
+                      <% } else if (!archive) { %>
                         <a href="#contact-csv">Review CSV</a>
                       <% } %>
                     </td>
@@ -164,8 +171,8 @@
           <nav class="pagination" aria-label="Results pagination">
             <span><%= offset + 1 %>–<%= end %> of <%= total %></span>
             <div class="row-actions">
-              <% if (page > 1) { %><a class="button button-small" href="/files?view=<%= view %>&amp;page=<%= page - 1 %>#images">Previous</a><% } %>
-              <% if (page < pages) { %><a class="button button-small" href="/files?view=<%= view %>&amp;page=<%= page + 1 %>#images">Next</a><% } %>
+              <% if (page > 1) { %><a class="button button-small" href="<%= filesPath %>?view=<%= view %>&amp;page=<%= page - 1 %>#images">Previous</a><% } %>
+              <% if (page < pages) { %><a class="button button-small" href="<%= filesPath %>?view=<%= view %>&amp;page=<%= page + 1 %>#images">Next</a><% } %>
             </div>
           </nav>
         <% } %>

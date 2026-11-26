@@ -1,21 +1,22 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import type { InvitationDraft } from '../invitations/service.ts';
 
-interface DraftRow extends RowDataPacket, InvitationDraft {}
-const DRAFT_SQL = 'SELECT template, revision FROM invitation_draft WHERE id = 1';
+type ActiveDraft = InvitationDraft & { eventId: number };
+interface DraftRow extends RowDataPacket, ActiveDraft {}
+const DRAFT_SQL = 'SELECT template, revision, event_id AS eventId FROM invitation_draft WHERE id = 1';
 
-export async function selectDraft(connection: Pool | PoolConnection, lock = false): Promise<InvitationDraft> {
+export async function selectDraft(connection: Pool | PoolConnection, lock = false): Promise<ActiveDraft> {
   const [rows] = await connection.execute<DraftRow[]>(lock ? `${DRAFT_SQL} FOR UPDATE` : DRAFT_SQL);
   const row = rows[0];
   if (!row) throw new Error('Invitation draft is missing. Check the database migration.');
-  return { template: row.template, revision: row.revision };
+  return { template: row.template, revision: row.revision, eventId: row.eventId };
 }
 
 export async function advanceDraft(connection: PoolConnection) {
   await connection.execute('UPDATE invitation_draft SET revision = revision + 1 WHERE id = 1');
 }
 
-export async function withDraftLock<T>(pool: Pool, operation: (connection: PoolConnection, draft: InvitationDraft) => Promise<T>): Promise<T> {
+export async function withDraftLock<T>(pool: Pool, operation: (connection: PoolConnection, draft: ActiveDraft) => Promise<T>): Promise<T> {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();

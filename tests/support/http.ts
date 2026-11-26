@@ -10,7 +10,7 @@ import { InvitationsService } from '../../src/invitations/service.ts';
 import { memoryFilesRepository } from './files-repository.ts';
 import { memoryInvitationsRepository } from './invitations-repository.ts';
 
-export async function testSite(t: TestContext, delivery?: object) {
+export async function testSite(t: TestContext, delivery?: object, events?: object) {
   const path = await mkdtemp(join(tmpdir(), 'dinnerdance-http-'));
   const invitations = memoryInvitationsRepository();
   const filesService = new FilesService(memoryFilesRepository(() => invitations.advanceRevision()), path, 'LK');
@@ -20,7 +20,7 @@ export async function testSite(t: TestContext, delivery?: object) {
     sessionSecret: '12345678901234567890123456789012',
     origin: 'http://localhost:3000',
   };
-  const server = createApp({ filesService, invitationsService, config, delivery }).listen(0, '127.0.0.1');
+  const server = createApp({ filesService, invitationsService, config, delivery, events }).listen(0, '127.0.0.1');
   t.after(async () => {
     await new Promise<void>(resolve => server.close(() => resolve()));
     await rm(path, { recursive: true, force: true });

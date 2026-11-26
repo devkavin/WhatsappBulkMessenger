@@ -15,12 +15,12 @@ export const IMAGE_BATCH_SIZE = 8;
 export type ContactImport = { filename: string; contacts: ContactRow[] };
 export type IncomingImage = { filename: string; bytes: Buffer };
 export type UploadIssue = { filename: string; reason: string };
-type FilesData = { csv: ContactImport | null; images: TicketImage[] };
+type FilesData = { csv: ContactImport | null; images: TicketImage[]; eventId?: number };
 
 export interface FilesRepository {
-  read(): Promise<FilesData>;
-  replaceCsv(csv: ContactImport): Promise<void>;
-  addImage(image: TicketImage, draft?: boolean): Promise<void>;
+  read(eventId?: number): Promise<FilesData>;
+  replaceCsv(csv: ContactImport, eventId?: number): Promise<void>;
+  addImage(image: TicketImage, draft?: boolean, eventId?: number): Promise<void>;
   findImage(id: string): Promise<TicketImage | null>;
   removeDraftImage(id: string): Promise<boolean>;
 }
@@ -36,12 +36,12 @@ export class FilesService {
     this.country = country;
   }
 
-  async read() {
-    const data = await this.repository.read();
+  async read(eventId?: number) {
+    const data = await this.repository.read(eventId);
     return { ...data, matches: matchImages(data.csv?.contacts ?? [], data.images) };
   }
 
-  async replaceCsv(filename: string, bytes: Buffer): Promise<void> {
+  async replaceCsv(filename: string, bytes: Buffer, eventId?: number): Promise<void> {
     if (!safeFilename(filename) || !/\.csv$/i.test(filename)) throw new ImportError('Choose a file with a .csv extension.');
     if (bytes.length > CSV_MAX_BYTES) throw new ImportError('The CSV must be 2 MB or smaller.');
 
@@ -53,10 +53,10 @@ export class FilesService {
     }
     const contacts = parseContacts(content, this.country);
     if (!contacts.length) throw new ImportError('The CSV needs at least one contact row.');
-    await this.repository.replaceCsv({ filename, contacts });
+    await this.repository.replaceCsv({ filename, contacts }, eventId);
   }
 
-  async uploadImages(files: IncomingImage[]) {
+  async uploadImages(files: IncomingImage[], eventId?: number) {
     const uploaded: string[] = [];
     const errors: UploadIssue[] = [];
     const selectedNames = new Set<string>();
@@ -72,7 +72,7 @@ export class FilesService {
         continue;
       }
 
-      await this.storeImage(filename, bytes, inspection.contentType, true);
+      await this.storeImage(filename, bytes, inspection.contentType, true, eventId);
       uploaded.push(filename);
     }
     return { uploaded, errors };
@@ -85,12 +85,12 @@ export class FilesService {
     return this.storeImage(filename, bytes, inspection.contentType, false);
   }
 
-  private async storeImage(filename: string, bytes: Buffer, contentType: TicketImage['contentType'], draft: boolean) {
+  private async storeImage(filename: string, bytes: Buffer, contentType: TicketImage['contentType'], draft: boolean, eventId?: number) {
     const id = randomUUID();
     const path = join(this.directory, id);
     await writeFile(path, bytes, { flag: 'wx', mode: 0o600 });
     try {
-      await this.repository.addImage({ id, filename, contentType }, draft);
+      await this.repository.addImage({ id, filename, contentType }, draft, eventId);
     } catch (error) {
       // A server can commit and lose its connection before the acknowledgement arrives.
       if (!(await this.repository.findImage(id))) {

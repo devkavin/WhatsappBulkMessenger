@@ -6,17 +6,22 @@ import type { InvitationsService } from './service.ts';
 import { deliveryDisplay, deliveryView } from '../delivery/status.ts';
 import type { DeliveryUi } from '../delivery/routes.ts';
 import { deliveryContext, DeliveryInputError } from '../delivery/worker.ts';
+import { EventConflictError, eventIdFrom } from '../events/model.ts';
+import type { EventsRepository, InvitationEvent } from '../events/model.ts';
+import { findArchivedEvent } from '../events/routes.ts';
 
 const readForm = urlencoded({ extended: false, limit: '512kb', parameterLimit: 10_000 });
 
-export function invitationRoutes(service: InvitationsService, delivery?: DeliveryUi) {
+export function invitationRoutes(service: InvitationsService, delivery?: DeliveryUi, events?: EventsRepository) {
   const router = Router();
   router.use(['/recipients', '/queue'], requireOperator);
   router.get('/recipients', (request, response) => renderReview(service, request, response));
   router.post('/recipients/message', readForm, requireRequestToken, async (request, response) => {
     const template = formText(request.body?.template);
+    const eventId = eventIdFrom(request.body?.eventId);
+    if (events && !eventId) throw new EventConflictError();
     try {
-      await service.saveMessage(template);
+      await service.saveMessage(template, eventId);
     } catch (error) {
       if (!(error instanceof InvitationInputError)) throw error;
       return renderReview(service, request, response, { editorValue: template, error: error.message, status: 422 });
@@ -39,22 +44,29 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
 
   const context = delivery && deliveryContext(delivery.settings);
   router.get('/queue', (request, response) => renderQueue(request, response));
+  if (events) router.get('/events/:eventId/queue', async (request, response) => {
+    const event = await findArchivedEvent(events, request.params.eventId);
+    if (!event) return response.sendStatus(404);
+    await renderQueue(request, response, '', event);
+  });
   if (delivery && context) {
     const {repository, settings} = delivery;
     router.post('/queue/control', readForm, requireRequestToken, async (request, response) => {
       try {
         const action = request.body?.action;
+        const eventId = eventIdFrom(request.body?.eventId);
+        if (events && !eventId) throw new EventConflictError();
         if (action === 'start') {
           if (settings.mode === 'live' && request.body?.consent !== 'yes') throw new DeliveryInputError('Confirm WhatsApp opt-in before starting a live batch.');
-          await repository.start(context, new Date());
+          await repository.start(context, new Date(), eventId);
         } else if (action === 'pause' || action === 'resume') {
-          await repository.pause(context, action === 'pause');
+          await repository.pause(context, action === 'pause', eventId);
         } else if (action === 'end-changed') {
-          await repository.endChangedBatch(context, new Date());
+          await repository.endChangedBatch(context, new Date(), eventId);
         } else { return response.sendStatus(400); }
         response.redirect(303, '/queue');
       } catch (error) {
-        if (!(error instanceof DeliveryInputError)) throw error;
+        if (!(error instanceof DeliveryInputError || error instanceof EventConflictError)) throw error;
         return renderQueue(request, response, error.message);
       }
     });
@@ -69,17 +81,28 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
     });
   }
 
-  async function renderQueue(request: Request, response: Response, error = '') {
-    const [staged, dashboard] = await Promise.all([service.readQueue(), delivery && context ? delivery.repository.dashboard(context) : null]);
-    const byInvitation = new Map(dashboard?.jobs.map(job => [job.invitationId, job]));
+  async function renderQueue(request: Request, response: Response, error = '', archive?: InvitationEvent) {
+    const eventId = archive?.id ?? (events ? (await service.readDraft()).eventId : undefined);
+    const requestedMode = request.query.mode;
+    const mode = archive && (requestedMode === 'live' || requestedMode === 'simulate') ? requestedMode :
+      archive?.archivedMode ?? delivery?.settings.mode;
+    const [staged, dashboard, archivedJobs] = await Promise.all([
+      service.readQueue(eventId),
+      !archive && delivery && context ? delivery.repository.dashboard(context, eventId) : null,
+      archive && delivery && mode ? delivery.repository.archivedJobs(archive.id, mode) : [],
+    ]);
+    const byInvitation = new Map((dashboard?.jobs ?? archivedJobs).map(job => [job.invitationId, job]));
+    const archivedStatus: 'cancelled' | 'unsent' | undefined = archive && (mode === archive.archivedMode ? 'cancelled' : 'unsent');
     const all = staged.map(row => {
       const job = byInvitation.get(row.id);
       const { appStatus, provider } = deliveryDisplay(job);
       const removed = row.status === 'removed';
-      return {...row, job, provider, status: removed ? row.status : job?.status ?? row.status,
-        appStatus: removed ? row.status : appStatus ?? row.status, updatedAt:job?.updatedAt ?? row.updatedAt};
+      const status = removed ? row.status : archivedStatus ?? row.status;
+      return {...row, job, provider, status: removed ? status : job?.status ?? status,
+        appStatus: removed ? status : appStatus ?? status,
+        updatedAt:job?.updatedAt ?? (status === 'cancelled' ? archive?.archivedAt ?? row.updatedAt : row.updatedAt)};
     });
-    const counts = {queued:0, submitting:0, submitted:0, delivered:0, failed:0, review:0, removed:0, cancelled:0};
+    const counts = {queued:0, submitting:0, submitted:0, delivered:0, failed:0, review:0, removed:0, cancelled:0, unsent:0};
     const appCounts = {...counts};
     const providerCounts = {accepted:0, queued:0, sent:0, delivered:0, failed:0};
     for (const row of all) {
@@ -88,7 +111,8 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
       if (row.status !== 'removed' && row.provider?.status) providerCounts[row.provider.status]++;
     }
     const requested = formText(request.query.view);
-    const view = Object.hasOwn(counts, requested) ? requested : 'all';
+    const statuses = Object.keys(counts).filter(status => archive || status !== 'unsent');
+    const view = statuses.includes(requested) ? requested : 'all';
     const search = formText(request.query.q).trim();
     const needle = search.toLocaleLowerCase();
     const matching = all.filter(row => (view === 'all' ? row.status !== 'removed' : row.status === view) &&
@@ -96,14 +120,19 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
     const pages = Math.max(1, Math.ceil(matching.length / 25));
     const page = Math.max(1, Math.min(pages, Number.parseInt(formText(request.query.page), 10) || 1));
     const rows = matching.slice((page - 1) * 25, page * 25);
-    const added = /^\d+$/.test(formText(request.query.added)) ? Number(request.query.added) : null;
+    const added = !archive && /^\d+$/.test(formText(request.query.added)) ? Number(request.query.added) : null;
     const notice = added === 0 ? 'The selected tickets are already queued.' : added === null ? '' : `${added} ${added === 1 ? 'invitation' : 'invitations'} added to the queue.`;
     const canStart = dashboard?.state === 'waiting' && dashboard.liveReady && counts.queued > 0;
-    const refreshUrl = `/queue?${new URLSearchParams({view, q:search, page:String(page)})}`;
+    const queuePath = archive ? `/events/${archive.id}/queue` : '/queue';
+    const queueUrl = (targetPage: number) => {
+      const query = new URLSearchParams({view, q:search, page:String(targetPage)});
+      if (archive && mode) query.set('mode', mode);
+      return `${queuePath}?${query}`;
+    };
     response.status(error ? 409 : 200).render('queue', {
-      csrf:request.session?.csrf, dashboard, counts, canStart, error, mode:delivery?.settings.mode,
+      csrf:request.session?.csrf, dashboard, counts, statuses, canStart, error, mode, archive, eventId, queuePath, queueUrl,
       rate:delivery?.settings.perMinute, rows, view, search, page, pages, total:matching.length, notice,
-      ...deliveryView, appCounts, providerCounts, refreshUrl,
+      ...deliveryView, appCounts, providerCounts, refreshUrl:queueUrl(page),
     });
   }
   router.post('/queue/:id/remove', readForm, requireRequestToken, async (request, response) => {

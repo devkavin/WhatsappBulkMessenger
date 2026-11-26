@@ -4,7 +4,7 @@ import type { Job, ProviderStatusSource } from './worker.ts';
 
 const deliveryLabels = {
   queued: 'Queued', submitting: 'Submitting', submitted: 'Submitted', delivered: 'Delivered', failed: 'Failed',
-  review: 'Needs review', cancelled: 'Cancelled', removed: 'Removed',
+  review: 'Needs review', cancelled: 'Cancelled', removed: 'Removed', unsent: 'Unsent',
 };
 
 export const wassengerLabels: Record<WassengerStatus, string> = {

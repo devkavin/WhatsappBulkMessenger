@@ -8,6 +8,7 @@ const zone = document.querySelector('[data-bulk-upload]');
 if (zone) {
   const picker = zone.querySelector('input[type="file"]');
   const token = zone.querySelector('input[name="_csrf"]').value;
+  const eventId = zone.querySelector('input[name="eventId"]')?.value;
   const feedback = document.querySelector('[data-upload-feedback]');
   const status = feedback.querySelector('[data-upload-status]');
   const progress = feedback.querySelector('[data-upload-progress]');
@@ -60,6 +61,7 @@ if (zone) {
       for (let start = 0; start < accepted.length; start += batchSize) {
         const batch = accepted.slice(start, start + batchSize);
         const body = new FormData();
+        if (eventId) body.append('eventId', eventId);
         for (const file of batch) body.append('images', file);
         const response = await fetch(zone.action, {
           method: 'POST',

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { withDraftLock } from '../db/draft.ts';
+import { EventConflictError } from '../events/model.ts';
 import type { Invitation } from '../invitations/service.ts';
 import type { WassengerStatus } from './policy.ts';
 import { renderApprovedBody } from './providers.ts';
@@ -24,47 +25,62 @@ const REVIEW_NOTE = 'The worker stopped before confirming submission. Check the 
 
 export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
   return {
-    async dashboard(context) {
+    async dashboard(context, eventId) {
       const [control, [jobs], liveReady] = await Promise.all([
         readControl(pool),
         pool.execute<JobRow[]>(`SELECT ${JOB_COLUMNS}, ${PROVIDER_COLUMNS} FROM outbound_jobs j
+          JOIN staged_invitations s ON s.id = j.invitation_id
           LEFT JOIN outbound_attempts a ON a.reference = j.current_ref
-          WHERE j.active_invitation_id IS NOT NULL AND j.mode = ? ORDER BY j.sequence`, [context.mode]),
+          WHERE j.active_invitation_id IS NOT NULL AND j.mode = ?
+            AND s.event_id = COALESCE(?, (SELECT event_id FROM invitation_draft WHERE id = 1)) ORDER BY j.sequence`, [context.mode, eventId ?? null]),
         readyForLive(pool, context),
       ]);
       const state = !control.runId ? 'waiting' : control.binding !== context.binding ? 'settings-changed' : control.paused ? 'paused' : 'running';
       return { state, liveReady, jobs, runId:control.runId };
     },
-    async start(context, now) {
-      await withDraftLock(pool, async connection => {
+    async archivedJobs(eventId, mode) {
+      const [rows] = await pool.execute<JobRow[]>(`SELECT ${JOB_COLUMNS}, ${PROVIDER_COLUMNS} FROM outbound_jobs j
+        JOIN staged_invitations s ON s.id = j.invitation_id
+        LEFT JOIN outbound_attempts a ON a.reference = j.current_ref
+        WHERE s.event_id = ? AND j.mode = ? ORDER BY j.active_invitation_id IS NOT NULL, j.sequence`, [eventId, mode]);
+      return rows;
+    },
+    async start(context, now, eventId) {
+      await withDraftLock(pool, async (connection, draft) => {
+        if (eventId !== draft.eventId) throw new EventConflictError();
         const control = await lockControl(connection);
         if (control.runId) throw new DeliveryInputError('Finish or resume the current batch first.');
         if (!(await readyForLive(connection, context))) throw new DeliveryInputError('Send a live test and wait for delivery before starting the event batch.');
         const [pending] = await connection.execute<InvitationRow[]>(`
           SELECT s.id, s.ticket_no AS ticketNumber, s.name, s.phone, s.image_id AS imageId, s.message
           FROM staged_invitations s LEFT JOIN outbound_jobs j ON j.active_invitation_id = s.id AND j.mode = ?
-          WHERE s.draft_id = 1 AND s.status = 'queued' AND j.id IS NULL ORDER BY s.sequence
-        `, [context.mode]);
+          WHERE s.event_id = ? AND s.status = 'queued' AND j.id IS NULL ORDER BY s.sequence
+        `, [context.mode, draft.eventId]);
         if (context.approvedBody && pending.some(row => row.message !== renderApprovedBody(context.approvedBody!, row.ticketNumber))) {
           throw new DeliveryInputError('A staged invitation differs from the approved template. Remove it and stage it again with the approved wording.');
         }
         const runId = randomUUID();
         for (const invitation of pending) await insertJob(connection, context, invitation, invitation.id, runId, null, now);
         const [retried] = await connection.execute<ResultSetHeader>(`
-          UPDATE outbound_jobs SET run_id = ? WHERE invitation_id IS NOT NULL AND run_id IS NULL AND status = 'queued' AND binding = ?
-        `, [runId, context.binding]);
+          UPDATE outbound_jobs j JOIN staged_invitations s ON s.id = j.invitation_id SET j.run_id = ?
+          WHERE s.event_id = ? AND j.run_id IS NULL AND j.status = 'queued' AND j.binding = ?
+        `, [runId, draft.eventId, context.binding]);
         if (pending.length + retried.affectedRows === 0) throw new DeliveryInputError('Stage invitations before starting a batch.');
         await connection.execute('UPDATE outbound_control SET run_id = ?, binding = ?, paused = 0 WHERE id = 1', [runId, context.binding]);
       });
     },
-    async pause(context, paused) {
-      await withControl(pool, async (connection, control) => {
+    async pause(context, paused, eventId) {
+      await withDraftLock(pool, async (connection, draft) => {
+        if (eventId !== draft.eventId) throw new EventConflictError();
+        const control = await lockControl(connection);
         if (!control.runId || control.binding !== context.binding) throw new DeliveryInputError('There is no active batch with these settings.');
         await connection.execute('UPDATE outbound_control SET paused = ? WHERE id = 1', [Number(paused)]);
       });
     },
-    async endChangedBatch(context, now) {
-      await withControl(pool, async (connection, control) => {
+    async endChangedBatch(context, now, eventId) {
+      await withDraftLock(pool, async (connection, draft) => {
+        if (eventId !== draft.eventId) throw new EventConflictError();
+        const control = await lockControl(connection);
         if (!control.runId || control.binding === context.binding) throw new DeliveryInputError('There is no batch using previous settings.');
         await connection.execute(`UPDATE outbound_jobs SET status = 'cancelled', lease_until = NULL, updated_at = ?,
           note = 'Batch ended after settings changed.' WHERE run_id = ?
@@ -73,12 +89,14 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
       });
     },
     async retry(context, id, now) {
-      await withControl(pool, async connection => {
+      await withDraftLock(pool, async (connection, draft) => {
+        await lockControl(connection);
         const [result] = await connection.execute<ResultSetHeader>(`
-          UPDATE outbound_jobs SET status = 'queued', run_id = NULL, current_ref = NULL, attempt_count = 0,
-            retryable = 0, note = NULL, updated_at = ?
-          WHERE id = ? AND binding = ? AND invitation_id IS NOT NULL AND status = 'failed' AND retryable = 1 AND lease_until IS NULL
-        `, [now, id, context.binding]);
+          UPDATE outbound_jobs j JOIN staged_invitations s ON s.id = j.invitation_id
+          SET j.status = 'queued', j.run_id = NULL, j.current_ref = NULL, j.attempt_count = 0,
+            j.retryable = 0, j.note = NULL, j.updated_at = ?
+          WHERE s.event_id = ? AND j.id = ? AND j.binding = ? AND j.status = 'failed' AND j.retryable = 1 AND j.lease_until IS NULL
+        `, [now, draft.eventId, id, context.binding]);
         if (!result.affectedRows) throw new DeliveryInputError('This invitation is ineligible for retry.');
       });
     },

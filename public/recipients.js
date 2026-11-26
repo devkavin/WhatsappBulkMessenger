@@ -41,7 +41,9 @@ function initializeRecipients(workspace) {
   if (!rows.length) return;
   const form = workspace.querySelector('#stage-form');
 
-  const storageKey = 'dinnerdance:recipient-deselections';
+  const baseStorageKey = 'dinnerdance:recipient-deselections';
+  const eventId = workspace.dataset.eventId;
+  const storageKey = eventId && eventId !== '1' ? `${baseStorageKey}:${eventId}` : baseStorageKey;
   const keys = new Set(rows.map(row => row.key));
   const deselected = new Set(readDeselections().filter(key => keys.has(key)));
   const filters = [...workspace.querySelectorAll('[data-filter]')];
