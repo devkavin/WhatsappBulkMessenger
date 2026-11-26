@@ -1,6 +1,13 @@
 import { parsePhoneNumberFromString } from 'libphonenumber-js/max';
 import type { WassengerStatus } from './policy.ts';
-import type { Job, ProviderStatusSource } from './worker.ts';
+import type { Dashboard, Job, ProviderStatusSource } from './worker.ts';
+
+export function batchState(binding: string, batch?: { binding: string; isActive: number; paused: number }): Dashboard['state'] {
+  if (!batch) return 'waiting';
+  if (batch.binding !== binding) return 'settings-changed';
+  if (!batch.isActive) return 'scheduled';
+  return batch.paused ? 'paused' : 'running';
+}
 
 const deliveryLabels = {
   queued: 'Queued', submitting: 'Submitting', submitted: 'Submitted', delivered: 'Delivered', failed: 'Failed',

@@ -5,78 +5,117 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Events · WaBulk</title>
   <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/status-refresh.js" defer></script>
+  <script src="/assets/events.js" defer></script>
 </head>
 <body>
   <%- include('navigation', { active: 'events' }) %>
-  <main class="workspace">
-    <div class="page-title"><h1>Events</h1></div>
-    <% if (error) { %><p class="notice notice-error" role="alert"><%= error %></p><% } %>
-    <section class="panel" aria-labelledby="next-event-title">
-      <h2 id="next-event-title">Create event</h2>
-      <form action="/events" method="post" class="event-form">
-        <input type="hidden" name="_csrf" value="<%= csrf %>">
-        <input type="hidden" name="eventId" value="<%= event.id %>">
-        <label for="event-name">New event name</label>
-        <input id="event-name" type="text" name="name" value="<%= name %>" maxlength="120" required>
-        <button type="submit" class="button button-primary">Create event</button>
-      </form>
-    </section>
-    <section class="panel" aria-labelledby="open-events-title">
+  <main class="workspace events-workspace" data-status-refresh="<%= pageUrl() %>">
+    <div class="page-title">
+      <h1>Events</h1>
+      <a class="button button-primary" href="<%= pageUrl() %>&amp;create=1" data-create-event><span class="event-create-icon" aria-hidden="true">+</span> Create event</a>
+    </div>
+    <% if (error && !createOpen && !archive) { %><p class="notice notice-error" role="alert"><%= error %></p><% } %>
+
+    <section class="panel event-panel" aria-labelledby="open-events-title">
       <h2 id="open-events-title">Open events</h2>
       <div class="table-wrap" role="region" aria-labelledby="open-events-title" tabindex="0">
-        <table>
-          <thead><tr><th scope="col">Event</th><th scope="col">Queue</th></tr></thead>
+        <table class="event-table">
+          <thead><tr><th scope="col">Event</th><th scope="col">Send status</th><th scope="col" class="event-actions-cell">Actions</th></tr></thead>
           <tbody>
-            <% for (const openEvent of open) { %>
-              <tr><th scope="row"><%= openEvent.name %></th><td>
-                <% if (openEvent.id === event.id) { %><a href="/queue">Current event queue</a><% } else { %>
-                  <form action="/events/<%= openEvent.id %>/select" method="post">
-                    <input type="hidden" name="_csrf" value="<%= csrf %>">
-                    <button type="submit" class="button button-small" aria-label="Open <%= openEvent.name %>">Open event</button>
-                  </form>
-                <% } %>
-              </td></tr>
+            <% const sendLabels = { waiting:'Waiting to start', scheduled:'Scheduled', running:'Sending', paused:'Paused', 'settings-changed':'Settings changed' }; %>
+            <% for (const row of open.rows) { %>
+              <tr>
+                <th scope="row"><%= row.name %></th>
+                <td data-status-region="event-send-<%= row.id %>">
+                  <span class="event-send-state event-send-<%= row.sendState %>"><span class="event-send-icon" aria-hidden="true"></span><span><%= sendLabels[row.sendState] %></span></span>
+                </td>
+                <td class="event-actions-cell">
+                  <div class="row-actions event-row-actions">
+                    <% if (row.id === event.id) { %><a href="/queue" class="button button-small" aria-label="Open queue for <%= row.name %>">Open queue</a><% } else { %>
+                      <form action="/events/<%= row.id %>/select" method="post">
+                        <input type="hidden" name="_csrf" value="<%= csrf %>">
+                        <button type="submit" class="button button-small" aria-label="Open queue for <%= row.name %>">Open queue</button>
+                      </form>
+                    <% } %>
+                    <% if (open.total > 1) { %>
+                      <button type="button" class="button button-small event-menu-trigger" popovertarget="event-actions-<%= row.id %>" aria-label="Actions for <%= row.name %>"><span aria-hidden="true">···</span></button>
+                      <div id="event-actions-<%= row.id %>" class="event-menu" popover>
+                        <a href="<%= pageUrl() %>&amp;archiveEvent=<%= row.id %>">Archive event</a>
+                      </div>
+                    <% } %>
+                  </div>
+                </td>
+              </tr>
             <% } %>
           </tbody>
         </table>
       </div>
-      <% if (open.length > 1) { %>
-      <details class="csv-issues">
-        <summary>Archive <%= event.name %></summary>
-        <p>Archiving cancels <strong><%= pending %> pending <%= pending === 1 ? 'invitation' : 'invitations' %></strong> for this event. Messages already handed off to Wassenger can still arrive.</p>
-      <% if (inFlight) { %>
-        <p role="status">A submission is in progress. <a href="/queue">Pause sending in the queue</a> and return here when it finishes.</p>
-        <a class="button" href="/events">Refresh status</a>
-      <% } else { %>
-        <form action="/events/<%= event.id %>/archive" method="post" class="event-form">
-          <input type="hidden" name="_csrf" value="<%= csrf %>">
-          <input type="hidden" name="pending" value="<%= pending %>">
-          <label><input type="checkbox" name="confirm" value="yes" required> Confirm archive</label>
-          <button type="submit" class="button">Archive event</button>
-        </form>
-      <% } %>
-      </details>
-      <% } %>
+      <%- include('event-pagination', { list:open, label:'Open event pages', href:(page) => pageUrl(page, archived.page) }) %>
     </section>
-    <section class="panel" aria-labelledby="past-events-title">
+
+    <section class="panel event-panel" aria-labelledby="past-events-title">
       <h2 id="past-events-title">Past events</h2>
-      <% if (!archived.length) { %><p class="empty-state">Archived events will appear here.</p><% } else { %>
+      <% if (!archived.total) { %><p class="empty-state event-empty">Archived events will appear here.</p><% } else { %>
         <div class="table-wrap" role="region" aria-labelledby="past-events-title" tabindex="0">
-          <table>
-            <thead><tr><th scope="col">Event</th><th scope="col">Archived</th><th scope="col">History</th></tr></thead>
+          <table class="event-table">
+            <thead><tr><th scope="col">Event</th><th scope="col">Archived</th><th scope="col" class="event-actions-cell">Actions</th></tr></thead>
             <tbody>
-              <% for (const old of archived) { %>
+              <% for (const row of archived.rows) { %>
                 <tr>
-                  <th scope="row"><%= old.name %></th>
-                  <td><time datetime="<%= old.archivedAt.toISOString() %>"><%= displayTime.format(old.archivedAt) %></time></td>
-                  <td><div class="row-actions"><a href="/events/<%= old.id %>/files">Tickets</a><a href="/events/<%= old.id %>/queue">Delivery history</a></div></td>
+                  <th scope="row"><%= row.name %></th>
+                  <td><time datetime="<%= row.archivedAt.toISOString() %>"><%= displayTime.format(row.archivedAt) %></time></td>
+                  <td class="event-actions-cell"><div class="row-actions event-row-actions">
+                    <a class="button button-small" href="/events/<%= row.id %>/files" aria-label="Tickets for <%= row.name %>">Tickets</a>
+                    <a class="button button-small" href="/events/<%= row.id %>/queue" aria-label="Delivery history for <%= row.name %>">Delivery history</a>
+                  </div></td>
                 </tr>
               <% } %>
             </tbody>
           </table>
         </div>
+        <%- include('event-pagination', { list:archived, label:'Past event pages', href:(page) => pageUrl(open.page, page) }) %>
       <% } %>
     </section>
+
+    <dialog class="confirm-dialog event-dialog" id="create-event" aria-labelledby="create-event-title" <%= createOpen ? 'open' : '' %>>
+      <h2 id="create-event-title">Create event</h2>
+      <% if (error && createOpen) { %><p class="notice notice-error" role="alert"><%= error %></p><% } %>
+      <form action="<%= pageUrl() %>" method="post" class="event-form">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <input type="hidden" name="eventId" value="<%= event.id %>">
+        <label for="event-name">Event name</label>
+        <input id="event-name" type="text" name="name" value="<%= name %>" maxlength="120" required autofocus>
+        <div class="row-actions confirm-actions">
+          <a class="button" href="<%= pageUrl() %>" data-close-event-dialog>Cancel</a>
+          <button type="submit" class="button button-primary">Create event</button>
+        </div>
+      </form>
+    </dialog>
+
+    <% if (archive) { %>
+      <dialog open class="confirm-dialog event-dialog" id="archive-event" aria-labelledby="archive-event-title">
+        <h2 id="archive-event-title">Archive <%= archive.event.name %>?</h2>
+        <% if (error && !createOpen) { %><p class="notice notice-error" role="alert"><%= error %></p><% } %>
+        <p>Archiving cancels <strong><%= archive.pending %> pending <%= archive.pending === 1 ? 'invitation' : 'invitations' %></strong>. Invitations already handed off to Wassenger can still arrive.</p>
+        <% if (archive.inFlight) { %>
+          <p role="status">A submission is in progress. Try again once it finishes.</p>
+          <div class="row-actions confirm-actions">
+            <a class="button" href="<%= pageUrl() %>" data-close-event-dialog autofocus>Cancel</a>
+            <a class="button" href="<%= pageUrl() %>&amp;archiveEvent=<%= archive.event.id %>">Refresh status</a>
+          </div>
+        <% } else { %>
+          <form action="/events/<%= archive.event.id %>/archive<%= pageUrl().slice('/events'.length) %>" method="post">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <input type="hidden" name="pending" value="<%= archive.pending %>">
+            <div class="row-actions confirm-actions">
+              <a class="button" href="<%= pageUrl() %>" data-close-event-dialog autofocus>Cancel</a>
+              <button class="button event-archive-button" type="submit" name="confirm" value="yes">Archive event</button>
+            </div>
+          </form>
+        <% } %>
+      </dialog>
+    <% } %>
   </main>
 </body>
 </html>

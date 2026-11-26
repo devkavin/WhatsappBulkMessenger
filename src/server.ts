@@ -14,7 +14,7 @@ const pool = createPool({ ...config.database, connectionLimit: 6, charset: 'UTF8
 const filesService = new FilesService(mysqlFilesRepository(pool), config.uploadDir, config.country);
 const invitationsService = new InvitationsService(filesService, mysqlInvitationsRepository(pool));
 const delivery = { repository:mysqlDeliveryRepository(pool), settings:readDeliverySettings(process.env, config.origin), country:config.country };
-const events = mysqlEventsRepository(pool, delivery.settings.mode);
+const events = mysqlEventsRepository(pool, delivery.settings);
 const server = createApp({ filesService, invitationsService, config, delivery, events }).listen(config.port, '0.0.0.0', () => {
   console.log(`WaBulk is listening on port ${config.port}.`);
 });

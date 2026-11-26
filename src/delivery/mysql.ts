@@ -5,6 +5,7 @@ import { EventConflictError } from '../events/model.ts';
 import type { Invitation } from '../invitations/service.ts';
 import type { WassengerStatus } from './policy.ts';
 import { renderApprovedBody } from './providers.ts';
+import { batchState } from './status.ts';
 import { DeliveryInputError } from './worker.ts';
 import type { DeliveryContext, DeliveryRepository, Job, ProviderStatusSource, TestRecipient } from './worker.ts';
 
@@ -39,7 +40,7 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
             AND s.event_id = COALESCE(?, (SELECT event_id FROM invitation_draft WHERE id = 1)) ORDER BY j.sequence`, [context.mode, eventId ?? null]),
         readyForLive(pool, context),
       ]);
-      const state = !batch ? 'waiting' : batch.binding !== context.binding ? 'settings-changed' : !batch.isActive ? 'scheduled' : batch.paused ? 'paused' : 'running';
+      const state = batchState(context.binding, batch);
       return { state, liveReady, jobs, runId:batch?.runId };
     },
     async archivedJobs(eventId, mode) {

@@ -1,7 +1,40 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { csrf, testSite } from './support/http.ts';
-import { EventConflictError } from '../src/events/model.ts';
+import { EventConflictError, eventPage } from '../src/events/model.ts';
+
+function pageOf<T>(rows: T[], requested: number) {
+  const page = eventPage(rows.length, requested);
+  return { ...page, rows:rows.slice(page.offset, page.last) };
+}
+
+test('paginates both event tables independently and keeps actions on their rows', async t => {
+  const now = new Date();
+  const makeEvents = (prefix: string, start: number) => Array.from({length:12}, (_, index) => ({
+    id:start + index, name:`${prefix} ${index + 1}`, createdAt:now,
+    archivedAt:start === 1 ? null : now, archivedMode:null, sendState:'scheduled',
+  }));
+  const open = makeEvents('Open sample', 1);
+  const past = makeEvents('Past sample', 50);
+  const {base, signIn} = await testSite(t, undefined, {
+    async preview(openPage = 1, pastPage = 1) {
+      return {event:open[0], open:pageOf(open, openPage), archived:pageOf(past, pastPage), archive:null};
+    },
+  });
+  const headers = await signIn();
+  const response = await fetch(`${base}/events?openPage=2&pastPage=3`, {headers});
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /Showing 6–10 of 12/);
+  assert.match(html, /Showing 11–12 of 12/);
+  assert.match(html, />Open sample 6</);
+  assert.match(html, />Past sample 11</);
+  assert.doesNotMatch(html, />Open sample 1<|>Past sample 6</);
+  assert.match(html, /href="\/events\?openPage=3&amp;pastPage=3"/);
+  assert.match(html, /href="\/events\?openPage=2&amp;pastPage=2"/);
+  assert.match(html, /aria-label="Actions for Open sample 6"/);
+  assert.match(html, />Scheduled</);
+});
 
 test('creates, switches and schedules events independently, then archives explicitly', async t => {
   const original = { id:1, name:'Dinner Dance', createdAt:new Date(), archivedAt:null, archivedMode:null };
@@ -29,7 +62,12 @@ test('creates, switches and schedules events independently, then archives explic
       },
     },
   }, {
-    async preview() { return { event:active, pending, inFlight:false, open:[...(isArchived ? [] : [original]), ...(next ? [next] : [])], archived:isArchived ? [archived] : [] }; },
+    async preview(openPage, pastPage, archiveId) {
+      const open = [...(isArchived ? [] : [{...original, sendState:'running'}]), ...(next ? [{...next, sendState:scheduled ? 'scheduled' : 'waiting'}] : [])];
+      const target = open.find(row => row.id === archiveId);
+      return { event:active, open:pageOf(open, openPage), archived:pageOf(isArchived ? [archived] : [], pastPage),
+        archive:target ? {event:target, pending, inFlight:false} : null };
+    },
     async findArchived(id) { return isArchived && id === 1 ? archived : null; },
     async create(expectedId, name) {
       assert.equal(expectedId, active.id);
@@ -37,7 +75,7 @@ test('creates, switches and schedules events independently, then archives explic
     },
     async select(id) { active = id === 1 ? original : next!; },
     async archive(expectedId, expectedPending) {
-      if (expectedId !== active.id || expectedPending !== pending) throw new EventConflictError('Review the new pending count.');
+      if (expectedId !== 1 || expectedPending !== pending) throw new EventConflictError('Review the new pending count.');
       active = next!;
       isArchived = true;
     },
@@ -49,6 +87,7 @@ test('creates, switches and schedules events independently, then archives explic
   const headers = await signIn();
   const page = await (await fetch(url, {headers})).text();
   assert.match(page, /Create event/);
+  assert.match(await (await fetch(`${url}?create=1`, {headers})).text(), /id="create-event"[^>]+\bopen>/);
   const post = (path: string, fields: Record<string, string> = {}) => fetch(`${base}${path}`, { method:'POST', redirect:'manual', headers,
     body:new URLSearchParams({_csrf:csrf(page), ...fields}) });
   assert.equal((await post('/events', {_csrf:'invalid'})).status, 403);
@@ -64,7 +103,9 @@ test('creates, switches and schedules events independently, then archives explic
   assert.match(await (await fetch(`${base}/queue`, {headers})).text(), /Scheduled to send/);
   assert.equal((await post('/events/1/select')).status, 303);
   assert.match(await (await fetch(`${base}/queue`, {headers})).text(), /Pause sending/);
-  assert.match(await (await fetch(url, {headers})).text(), /2 pending invitations/);
+  const confirmation = await (await fetch(`${url}?archiveEvent=1`, {headers})).text();
+  assert.match(confirmation, /Archive Dinner Dance\?/);
+  assert.match(confirmation, /2 pending invitations/);
   assert.equal((await post('/events/1/archive', {pending:'2'})).status, 422);
   const conflict = await post('/events/1/archive', {pending:'1', confirm:'yes'});
   assert.equal(conflict.status, 409);

@@ -20,6 +20,7 @@ function fixture(work = { pending:2, inFlight:0 }) {
       if (sql.includes('SELECT template, revision')) return [[{eventId:1, template:'Ticket {{ticket_number}}', revision:10}]];
       if (sql.includes('SELECT run_id AS runId')) return [[{runId:'run-1', binding:'simulation', paused:0}]];
       if (sql.includes('AS inFlight')) return [[work]];
+      if (sql.includes('WHERE e.id = ? AND e.archived_at IS NULL')) return [values[0] === 99 ? [] : [{id:values[0]}]];
       if (sql.startsWith('INSERT INTO invitation_events')) return [{insertId:2}];
       if (sql.includes('SELECT id, draft_template AS template')) return [[{id:2, template:'Other {{ticket_number}}'}]];
       if (/^(UPDATE|DELETE)/.test(sql)) return [{affectedRows:0}];
@@ -27,7 +28,7 @@ function fixture(work = { pending:2, inFlight:0 }) {
     },
   };
   const pool = { async getConnection() { return connection; } } as unknown as Pool;
-  return { events:mysqlEventsRepository(pool, 'live'), delivery:mysqlDeliveryRepository(pool), executed, transaction };
+  return { events:mysqlEventsRepository(pool, {mode:'live', binding:'fixture'}), delivery:mysqlDeliveryRepository(pool), executed, transaction };
 }
 
 test('creating and switching events leaves the worker and outbound jobs alone', async () => {
@@ -46,22 +47,29 @@ test('archiving cancels only the selected event’s scheduled work', async () =>
   assert.deepEqual(transaction, ['begin', 'commit', 'release']);
   assert.match(executed[0].sql, /invitation_draft.*FOR UPDATE/);
   assert.match(executed[1].sql, /outbound_control.*FOR UPDATE/);
-  assert.deepEqual(executed[2].values, [1, 'live', 1]);
-  assert.match(executed[2].sql, /j\.mode = \?/);
-  assert.match(executed[4].sql, /s\.event_id = \? AND \(j\.status = 'queued' OR \(j\.status = 'submitting' AND j\.dispatch_at IS NULL\)\)/);
-  assert.deepEqual(executed[4].values, [now, 1]);
-  assert.match(executed[5].sql, /q\.run_id = c\.run_id[\s\S]+q\.event_id = \?/);
-  assert.deepEqual(executed[5].values, [1]);
+  assert.deepEqual(executed[3].values, [1, 'live', 1]);
+  assert.match(executed[3].sql, /j\.mode = \?/);
+  assert.match(executed[5].sql, /s\.event_id = \? AND \(j\.status = 'queued' OR \(j\.status = 'submitting' AND j\.dispatch_at IS NULL\)\)/);
+  assert.deepEqual(executed[5].values, [now, 1]);
+  assert.match(executed[6].sql, /q\.run_id = c\.run_id[\s\S]+q\.event_id = \?/);
   assert.deepEqual(executed[6].values, [1]);
-  assert.deepEqual(executed[7].values, [now, 'live', 1]);
-  assert.deepEqual(executed[8].values, [2, 'Other {{ticket_number}}']);
+  assert.deepEqual(executed[7].values, [1]);
+  assert.deepEqual(executed[8].values, [now, 'live', 1]);
+  assert.deepEqual(executed[9].values, [2, 'Other {{ticket_number}}']);
+});
+
+test('archiving an unselected event leaves the selected event in place', async () => {
+  const {events, executed} = fixture();
+  await events.archive(2, 2, now);
+  assert.ok(!executed.some(({sql}) => sql.startsWith('UPDATE invitation_draft')));
+  assert.deepEqual(executed.find(({sql}) => sql.startsWith('DELETE FROM event_send_queue'))?.values, [2]);
 });
 
 test('rolls back a stale confirmation or an in-flight dispatch before writing', async () => {
   for (const [eventId, count, inFlight, message] of [
     [1, 1, 0, /pending count changed/],
     [1, 2, 1, /submission is in progress/],
-    [2, 2, 0, /active event changed/],
+    [99, 2, 0, /already archived or unavailable/],
   ] as const) {
     const { events, executed, transaction } = fixture({ pending:2, inFlight });
     await assert.rejects(events.archive(eventId, count, now), error =>

@@ -1,0 +1,16 @@
+<% const pages = [...new Set([1, list.page - 1, list.page, list.page + 1, list.pages])].filter(page => page >= 1 && page <= list.pages).sort((a, b) => a - b); %>
+<div class="pagination event-pagination">
+  <span>Showing <%= list.first %>–<%= list.last %> of <%= list.total %></span>
+  <nav class="row-actions" aria-label="<%= label %>">
+    <% if (list.page > 1) { %><a class="button button-small" href="<%= href(list.page - 1) %>">Previous</a><% } else { %><button type="button" class="button button-small" disabled>Previous</button><% } %>
+    <% for (const [index, page] of pages.entries()) { %>
+      <% if (index && page - pages[index - 1] > 1) { %><span aria-hidden="true">…</span><% } %>
+      <% if (page === list.page) { %>
+        <span class="button button-small button-primary event-page-number" aria-current="page" aria-label="Page <%= page %>"><%= page %></span>
+      <% } else { %>
+        <a class="button button-small event-page-number" href="<%= href(page) %>" aria-label="Page <%= page %>"><%= page %></a>
+      <% } %>
+    <% } %>
+    <% if (list.page < list.pages) { %><a class="button button-small" href="<%= href(list.page + 1) %>">Next</a><% } else { %><button type="button" class="button button-small" disabled>Next</button><% } %>
+  </nav>
+</div>
