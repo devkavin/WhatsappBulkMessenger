@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Recipients · Dinner Dance</title>
+  <title>Recipients · WaBulk</title>
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/recipients.js" defer></script>
 </head>
@@ -12,7 +12,7 @@
 
   <main class="workspace" data-recipient-list data-event-id="<%= review.eventId ?? '' %>">
     <div class="page-title">
-      <h1>Review recipients</h1>
+      <h1><%= review.eventName ? `${review.eventName} · Recipients` : 'Review recipients' %></h1>
       <% if (!edit) { %><a class="button" href="/recipients?edit=1#message-editor">Edit message</a><% } %>
     </div>
 

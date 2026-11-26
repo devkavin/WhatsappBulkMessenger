@@ -6,7 +6,7 @@ export const DEFAULT_TEMPLATE = 'You’re invited to the Dinner Dance! Ticket {{
 export const MESSAGE_MAX_LENGTH = 2000;
 const TICKET_PLACEHOLDER = /\{\{\s*ticket_number\s*\}\}/g;
 
-export type InvitationDraft = { template: string | null; revision: number; eventId?: number };
+export type InvitationDraft = { template: string | null; revision: number; eventId?: number; eventName?: string };
 export type Invitation = {
   ticketNumber: string;
   name: string;
@@ -47,6 +47,7 @@ type Review = {
   candidateCount: number;
   version: string;
   eventId?: number;
+  eventName?: string;
 };
 
 export class InvitationsService {
@@ -138,6 +139,7 @@ function buildReview(files: Awaited<ReturnType<FilesService['read']>>, draft: In
       candidateCount: candidates.length,
       version: digest([draft.eventId, draft.revision, template, candidates]),
       eventId: draft.eventId,
+      eventName: draft.eventName,
     },
   };
 }

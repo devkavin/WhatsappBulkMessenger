@@ -16,7 +16,7 @@ const invitationsService = new InvitationsService(filesService, mysqlInvitations
 const delivery = { repository:mysqlDeliveryRepository(pool), settings:readDeliverySettings(process.env, config.origin), country:config.country };
 const events = mysqlEventsRepository(pool, delivery.settings.mode);
 const server = createApp({ filesService, invitationsService, config, delivery, events }).listen(config.port, '0.0.0.0', () => {
-  console.log(`Dinner Dance is listening on port ${config.port}.`);
+  console.log(`WaBulk is listening on port ${config.port}.`);
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

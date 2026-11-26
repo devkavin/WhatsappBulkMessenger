@@ -3,12 +3,14 @@ import type { DeliverySettings } from '../delivery/settings.ts';
 export type InvitationEvent = {
   id: number; name: string; createdAt: Date; archivedAt: Date | null; archivedMode: DeliverySettings['mode'] | null;
 };
-export type EventPreview = { event: InvitationEvent; pending: number; inFlight: boolean; archived: InvitationEvent[] };
+export type EventPreview = { event: InvitationEvent; pending: number; inFlight: boolean; open: InvitationEvent[]; archived: InvitationEvent[] };
 
 export interface EventsRepository {
   preview(): Promise<EventPreview>;
   findArchived(id: number): Promise<InvitationEvent | null>;
-  startNext(expectedId: number, expectedPending: number, name: string, now: Date): Promise<void>;
+  create(expectedId: number, name: string, now: Date): Promise<void>;
+  select(id: number): Promise<void>;
+  archive(expectedId: number, expectedPending: number, now: Date): Promise<void>;
 }
 
 export class EventConflictError extends Error {

@@ -23,7 +23,7 @@ const tick = deliveryWorker(mysqlDeliveryRepository(pool), settings, provider, a
 
 let stopping = false;
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => { stopping = true; });
-console.log(`Dinner Dance worker started in ${settings.mode} mode.`);
+console.log(`WaBulk worker started in ${settings.mode} mode.`);
 while (!stopping) {
   let delay = 1_000;
   try { await tick(); }

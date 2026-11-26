@@ -82,7 +82,8 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
   }
 
   async function renderQueue(request: Request, response: Response, error = '', archive?: InvitationEvent) {
-    const eventId = archive?.id ?? (events ? (await service.readDraft()).eventId : undefined);
+    const draft = !archive && events ? await service.readDraft() : undefined;
+    const eventId = archive?.id ?? draft?.eventId;
     const requestedMode = request.query.mode;
     const mode = archive && (requestedMode === 'live' || requestedMode === 'simulate') ? requestedMode :
       archive?.archivedMode ?? delivery?.settings.mode;
@@ -130,7 +131,7 @@ export function invitationRoutes(service: InvitationsService, delivery?: Deliver
       return `${queuePath}?${query}`;
     };
     response.status(error ? 409 : 200).render('queue', {
-      csrf:request.session?.csrf, dashboard, counts, statuses, canStart, error, mode, archive, eventId, queuePath, queueUrl,
+      csrf:request.session?.csrf, dashboard, counts, statuses, canStart, error, mode, archive, eventId, eventName:draft?.eventName, queuePath, queueUrl,
       rate:delivery?.settings.perMinute, rows, view, search, page, pages, total:matching.length, notice,
       ...deliveryView, appCounts, providerCounts, refreshUrl:queueUrl(page),
     });

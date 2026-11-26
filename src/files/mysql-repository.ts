@@ -14,7 +14,7 @@ interface ImageRow extends RowDataPacket, TicketImage {}
 export function mysqlFilesRepository(pool: Pool): FilesRepository {
   return {
     async read(eventId) {
-      const id = eventId ?? (await selectDraft(pool)).eventId;
+      const { eventId:id, eventName } = eventId === undefined ? await selectDraft(pool) : {eventId, eventName:undefined};
       const [[imports], [images]] = await Promise.all([
         pool.execute<CsvRow[]>('SELECT filename, contacts FROM draft_csv WHERE event_id = ?', [id]),
         pool.execute<ImageRow[]>(`
@@ -25,7 +25,7 @@ export function mysqlFilesRepository(pool: Pool): FilesRepository {
           ORDER BY draft.filename
         `, [id]),
       ]);
-      return { csv: imports[0] ?? null, images, eventId:id };
+      return { csv: imports[0] ?? null, images, eventId:id, eventName };
     },
     async replaceCsv({ filename, contacts }, eventId) {
       const json = JSON.stringify(contacts);

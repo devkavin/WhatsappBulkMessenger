@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Events · Dinner Dance</title>
+  <title>Events · WaBulk</title>
   <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
@@ -12,21 +12,50 @@
     <div class="page-title"><h1>Events</h1></div>
     <% if (error) { %><p class="notice notice-error" role="alert"><%= error %></p><% } %>
     <section class="panel" aria-labelledby="next-event-title">
-      <h2 id="next-event-title">Start new event</h2>
-      <p>Starting a new event archives <strong><%= event.name %></strong> and cancels <strong><%= pending %> pending <%= pending === 1 ? 'invitation' : 'invitations' %></strong>. Messages already handed off to Wassenger can still arrive.</p>
+      <h2 id="next-event-title">Create event</h2>
+      <form action="/events" method="post" class="event-form">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <input type="hidden" name="eventId" value="<%= event.id %>">
+        <label for="event-name">New event name</label>
+        <input id="event-name" type="text" name="name" value="<%= name %>" maxlength="120" required>
+        <button type="submit" class="button button-primary">Create event</button>
+      </form>
+    </section>
+    <section class="panel" aria-labelledby="open-events-title">
+      <h2 id="open-events-title">Open events</h2>
+      <div class="table-wrap" role="region" aria-labelledby="open-events-title" tabindex="0">
+        <table>
+          <thead><tr><th scope="col">Event</th><th scope="col">Queue</th></tr></thead>
+          <tbody>
+            <% for (const openEvent of open) { %>
+              <tr><th scope="row"><%= openEvent.name %></th><td>
+                <% if (openEvent.id === event.id) { %><a href="/queue">Current event queue</a><% } else { %>
+                  <form action="/events/<%= openEvent.id %>/select" method="post">
+                    <input type="hidden" name="_csrf" value="<%= csrf %>">
+                    <button type="submit" class="button button-small" aria-label="Open <%= openEvent.name %>">Open event</button>
+                  </form>
+                <% } %>
+              </td></tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+      <% if (open.length > 1) { %>
+      <details class="csv-issues">
+        <summary>Archive <%= event.name %></summary>
+        <p>Archiving cancels <strong><%= pending %> pending <%= pending === 1 ? 'invitation' : 'invitations' %></strong> for this event. Messages already handed off to Wassenger can still arrive.</p>
       <% if (inFlight) { %>
         <p role="status">A submission is in progress. <a href="/queue">Pause sending in the queue</a> and return here when it finishes.</p>
         <a class="button" href="/events">Refresh status</a>
       <% } else { %>
-        <form action="/events" method="post" class="event-form">
+        <form action="/events/<%= event.id %>/archive" method="post" class="event-form">
           <input type="hidden" name="_csrf" value="<%= csrf %>">
-          <input type="hidden" name="eventId" value="<%= event.id %>">
           <input type="hidden" name="pending" value="<%= pending %>">
-          <label for="event-name">New event name</label>
-          <input id="event-name" type="text" name="name" value="<%= name %>" maxlength="120" required>
-          <label><input type="checkbox" name="confirm" value="yes" required> Archive this event and start with an empty queue</label>
-          <button type="submit" class="button button-primary">Start new event</button>
+          <label><input type="checkbox" name="confirm" value="yes" required> Confirm archive</label>
+          <button type="submit" class="button">Archive event</button>
         </form>
+      <% } %>
+      </details>
       <% } %>
     </section>
     <section class="panel" aria-labelledby="past-events-title">

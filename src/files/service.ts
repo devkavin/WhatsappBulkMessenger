@@ -15,7 +15,7 @@ export const IMAGE_BATCH_SIZE = 8;
 export type ContactImport = { filename: string; contacts: ContactRow[] };
 export type IncomingImage = { filename: string; bytes: Buffer };
 export type UploadIssue = { filename: string; reason: string };
-type FilesData = { csv: ContactImport | null; images: TicketImage[]; eventId?: number };
+type FilesData = { csv: ContactImport | null; images: TicketImage[]; eventId?: number; eventName?: string };
 
 export interface FilesRepository {
   read(eventId?: number): Promise<FilesData>;

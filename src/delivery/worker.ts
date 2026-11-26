@@ -18,7 +18,7 @@ export type Job = Invitation & {
 export type Claimed = Job & { reference: string; leaseUntil: Date };
 export type TestRecipient = { id: string; name: string; phone: string };
 export type DeliveryContext = Pick<DeliverySettings, 'mode' | 'binding'> & { device: string | null; approvedBody: string | null };
-export type Dashboard = { state: 'waiting' | 'running' | 'paused' | 'settings-changed'; liveReady: boolean; jobs: Job[]; runId?: string | null };
+export type Dashboard = { state: 'waiting' | 'scheduled' | 'running' | 'paused' | 'settings-changed'; liveReady: boolean; jobs: Job[]; runId?: string | null };
 
 export interface DeliveryRepository {
   dashboard(context: DeliveryContext, eventId?: number): Promise<Dashboard>;

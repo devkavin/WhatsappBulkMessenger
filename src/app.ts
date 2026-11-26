@@ -141,7 +141,7 @@ async function renderFiles(request: Request, response: Response, service: FilesS
 
   response.status(status).render('files', {
     csrf: request.session?.csrf,
-    archive, eventId:state.eventId, filesPath:archive ? `/events/${archive.id}/files` : '/files',
+    archive, eventId:state.eventId, eventName:state.eventName, filesPath:archive ? `/events/${archive.id}/files` : '/files',
     csv: state.csv,
     issues,
     allCount: state.matches.rows.length,
@@ -159,7 +159,7 @@ async function renderFiles(request: Request, response: Response, service: FilesS
     batchSize: IMAGE_BATCH_SIZE,
     maxImageBytes: IMAGE_MAX_BYTES,
     error,
-    notice: archive ? '' : request.query.notice === 'event' ? 'New event started. Upload the contact list and ticket images.' :
+    notice: archive ? '' : request.query.notice === 'event' ? 'Event created. Upload the contact list and ticket images.' :
       request.query.notice === 'csv' ? 'Contact list updated.' : request.query.notice === 'images' ? 'Ticket images uploaded.' : '',
   });
 }

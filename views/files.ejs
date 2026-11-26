@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Files · Dinner Dance</title>
+  <title>Files · WaBulk</title>
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/uploads.js" defer></script>
 </head>
@@ -12,7 +12,7 @@
 
   <main class="workspace">
     <div class="page-title">
-      <h1><%= archive ? `${archive.name} · Tickets` : 'Manage uploads' %></h1>
+      <h1><%= archive ? `${archive.name} · Tickets` : eventName ? `${eventName} · Files` : 'Manage uploads' %></h1>
       <% if (archive) { %>
         <div class="row-actions"><a class="button" href="/events">Past events</a><a class="button" href="/events/<%= archive.id %>/queue">Delivery history</a></div>
       <% } else { %><a class="button" href="/recipients">Back to recipients</a><% } %>

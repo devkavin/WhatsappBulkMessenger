@@ -14,6 +14,8 @@ interface Control extends RowDataPacket {
 interface JobRow extends RowDataPacket, Job { leaseUntil: Date | null; attemptCount: number }
 interface RecipientRow extends RowDataPacket, TestRecipient {}
 interface InvitationRow extends RowDataPacket, Invitation { id: string }
+interface BatchRow extends RowDataPacket { runId: string; binding: string }
+interface DashboardBatch extends BatchRow { isActive: number; paused: number }
 
 const JOB_COLUMNS = `j.id, j.invitation_id AS invitationId, j.run_id AS runId, j.mode, j.status, j.current_ref AS reference,
   j.ticket_no AS ticketNumber, j.name, j.phone, j.image_id AS imageId, j.message, j.note, j.retryable,
@@ -26,8 +28,10 @@ const REVIEW_NOTE = 'The worker stopped before confirming submission. Check the 
 export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
   return {
     async dashboard(context, eventId) {
-      const [control, [jobs], liveReady] = await Promise.all([
-        readControl(pool),
+      const [[[batch]], [jobs], liveReady] = await Promise.all([
+        pool.execute<DashboardBatch[]>(`SELECT q.run_id AS runId, q.binding, c.run_id <=> q.run_id AS isActive, c.paused
+          FROM event_send_queue q CROSS JOIN outbound_control c WHERE c.id = 1
+          AND q.event_id = COALESCE(?, (SELECT event_id FROM invitation_draft WHERE id = 1))`, [eventId ?? null]),
         pool.execute<JobRow[]>(`SELECT ${JOB_COLUMNS}, ${PROVIDER_COLUMNS} FROM outbound_jobs j
           JOIN staged_invitations s ON s.id = j.invitation_id
           LEFT JOIN outbound_attempts a ON a.reference = j.current_ref
@@ -35,8 +39,8 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
             AND s.event_id = COALESCE(?, (SELECT event_id FROM invitation_draft WHERE id = 1)) ORDER BY j.sequence`, [context.mode, eventId ?? null]),
         readyForLive(pool, context),
       ]);
-      const state = !control.runId ? 'waiting' : control.binding !== context.binding ? 'settings-changed' : control.paused ? 'paused' : 'running';
-      return { state, liveReady, jobs, runId:control.runId };
+      const state = !batch ? 'waiting' : batch.binding !== context.binding ? 'settings-changed' : !batch.isActive ? 'scheduled' : batch.paused ? 'paused' : 'running';
+      return { state, liveReady, jobs, runId:batch?.runId };
     },
     async archivedJobs(eventId, mode) {
       const [rows] = await pool.execute<JobRow[]>(`SELECT ${JOB_COLUMNS}, ${PROVIDER_COLUMNS} FROM outbound_jobs j
@@ -48,8 +52,8 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
     async start(context, now, eventId) {
       await withDraftLock(pool, async (connection, draft) => {
         if (eventId !== draft.eventId) throw new EventConflictError();
-        const control = await lockControl(connection);
-        if (control.runId) throw new DeliveryInputError('Finish or resume the current batch first.');
+        await lockControl(connection);
+        if (await eventBatch(connection, draft.eventId)) throw new DeliveryInputError('This event already has a scheduled or running batch.');
         if (!(await readyForLive(connection, context))) throw new DeliveryInputError('Send a live test and wait for delivery before starting the event batch.');
         const [pending] = await connection.execute<InvitationRow[]>(`
           SELECT s.id, s.ticket_no AS ticketNumber, s.name, s.phone, s.image_id AS imageId, s.message
@@ -66,14 +70,15 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
           WHERE s.event_id = ? AND j.run_id IS NULL AND j.status = 'queued' AND j.binding = ?
         `, [runId, draft.eventId, context.binding]);
         if (pending.length + retried.affectedRows === 0) throw new DeliveryInputError('Stage invitations before starting a batch.');
-        await connection.execute('UPDATE outbound_control SET run_id = ?, binding = ?, paused = 0 WHERE id = 1', [runId, context.binding]);
+        await connection.execute('INSERT INTO event_send_queue (run_id, event_id, binding) VALUES (?, ?, ?)', [runId, draft.eventId, context.binding]);
       });
     },
     async pause(context, paused, eventId) {
       await withDraftLock(pool, async (connection, draft) => {
         if (eventId !== draft.eventId) throw new EventConflictError();
         const control = await lockControl(connection);
-        if (!control.runId || control.binding !== context.binding) throw new DeliveryInputError('There is no active batch with these settings.');
+        const batch = await eventBatch(connection, draft.eventId);
+        if (!batch || control.runId !== batch.runId || batch.binding !== context.binding) throw new DeliveryInputError('This event has no running batch with these settings.');
         await connection.execute('UPDATE outbound_control SET paused = ? WHERE id = 1', [Number(paused)]);
       });
     },
@@ -81,11 +86,13 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
       await withDraftLock(pool, async (connection, draft) => {
         if (eventId !== draft.eventId) throw new EventConflictError();
         const control = await lockControl(connection);
-        if (!control.runId || control.binding === context.binding) throw new DeliveryInputError('There is no batch using previous settings.');
+        const batch = await eventBatch(connection, draft.eventId);
+        if (!batch || batch.binding === context.binding) throw new DeliveryInputError('This event has no batch using previous settings.');
         await connection.execute(`UPDATE outbound_jobs SET status = 'cancelled', lease_until = NULL, updated_at = ?,
           note = 'Batch ended after settings changed.' WHERE run_id = ?
-          AND (status = 'queued' OR (status = 'submitting' AND dispatch_at IS NULL))`, [now, control.runId]);
-        await connection.execute('UPDATE outbound_control SET run_id = NULL, binding = NULL, paused = 0 WHERE id = 1');
+          AND (status = 'queued' OR (status = 'submitting' AND dispatch_at IS NULL))`, [now, batch.runId]);
+        await connection.execute('DELETE FROM event_send_queue WHERE run_id = ?', [batch.runId]);
+        if (control.runId === batch.runId) await clearRun(connection, control);
       });
     },
     async retry(context, id, now) {
@@ -146,6 +153,7 @@ export function mysqlDeliveryRepository(pool: Pool): DeliveryRepository {
         if (control.nextSendAt && control.nextSendAt > now) return null;
         const [inFlight] = await connection.execute<RowDataPacket[]>('SELECT id FROM outbound_jobs WHERE lease_until IS NOT NULL LIMIT 1');
         if (inFlight.length) return null;
+        if (!control.runId) await promoteNextRun(connection, control);
         const batch = control.binding === context.binding && !control.paused ? control.runId : null;
         const [jobs] = await connection.execute<JobRow[]>(`
           SELECT ${JOB_COLUMNS}, ${PROVIDER_COLUMNS} FROM outbound_jobs j
@@ -310,6 +318,25 @@ async function releaseCompletedRun(connection: PoolConnection, control: Control)
   const [rows] = await connection.execute<RowDataPacket[]>(`SELECT id FROM outbound_jobs WHERE run_id = ?
     AND (status IN ('queued', 'submitting') OR lease_until IS NOT NULL) LIMIT 1`, [control.runId]);
   if (rows.length) return;
+  await connection.execute('DELETE FROM event_send_queue WHERE run_id = ?', [control.runId]);
+  await clearRun(connection, control);
+}
+
+async function eventBatch(connection: PoolConnection, eventId: number) {
+  const [[batch]] = await connection.execute<BatchRow[]>(`SELECT run_id AS runId, binding FROM event_send_queue WHERE event_id = ?`, [eventId]);
+  return batch;
+}
+
+async function promoteNextRun(connection: PoolConnection, control: Control) {
+  const [[batch]] = await connection.execute<BatchRow[]>(`SELECT run_id AS runId, binding FROM event_send_queue ORDER BY sequence LIMIT 1`);
+  if (!batch) return;
+  await connection.execute('UPDATE outbound_control SET run_id = ?, binding = ?, paused = 0 WHERE id = 1', [batch.runId, batch.binding]);
+  control.runId = batch.runId;
+  control.binding = batch.binding;
+  control.paused = 0;
+}
+
+async function clearRun(connection: PoolConnection, control: Control) {
   await connection.execute('UPDATE outbound_control SET run_id = NULL, binding = NULL, paused = 0 WHERE id = 1');
   control.runId = null;
 }

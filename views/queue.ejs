@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Queue · Dinner Dance</title>
+  <title>Queue · WaBulk</title>
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/status-refresh.js" defer></script>
   <script src="/assets/queue.js" defer></script>
@@ -13,12 +13,12 @@
 
   <main class="workspace" data-status-refresh="<%= refreshUrl %>" data-event-id="<%= eventId ?? '' %>">
     <div class="page-title">
-      <h1><%= archive ? `${archive.name} · Delivery history` : 'Sending queue' %></h1>
+      <h1><%= archive ? `${archive.name} · Delivery history` : eventName ? `${eventName} · Sending queue` : 'Sending queue' %></h1>
       <% if (archive) { %>
         <div class="row-actions"><a class="button" href="/events">Past events</a><a class="button" href="/events/<%= archive.id %>/files">Tickets</a></div>
       <% } else { %>
       <div class="row-actions">
-      <% if (eventsEnabled) { %><a class="button" href="/events">Start new event</a><% } %>
+      <% if (eventsEnabled) { %><a class="button" href="/events">Switch event</a><% } %>
       <div data-status-region="queue-controls">
       <% if (dashboard?.state === 'running' || dashboard?.state === 'paused') { %>
         <form action="/queue/control" method="post">
@@ -34,6 +34,8 @@
         </form>
       <% } else if (canStart) { %>
         <button type="button" class="button button-primary" aria-haspopup="dialog" aria-controls="confirm-start" data-confirm-start>Start sending</button>
+      <% } else if (dashboard?.state === 'scheduled') { %>
+        <button type="button" class="button" disabled>Batch scheduled</button>
       <% } else { %><button type="button" class="button" disabled>Start sending</button><% } %>
       </div>
       </div>
@@ -44,7 +46,7 @@
         <h2 id="confirm-start-title"><%= mode === 'live' ? 'Start sending invitations?' : 'Start simulated batch?' %></h2>
         <p id="confirm-start-description"><%= mode === 'live'
           ? 'Start sending WhatsApp invitations to the queued recipients. By continuing, you confirm they agreed to receive these messages.'
-          : 'Run the queued invitations in simulation mode. No WhatsApp messages will be sent.' %></p>
+          : 'Run the queued invitations in simulation mode. No WhatsApp messages will be sent.' %> If another event is ahead, this batch will start automatically when it reaches the front of the send queue.</p>
         <form action="/queue/control" method="post">
           <input type="hidden" name="_csrf" value="<%= csrf %>">
           <% if (eventId) { %><input type="hidden" name="eventId" value="<%= eventId %>"><% } %>
@@ -61,7 +63,8 @@
     <section class="panel queue-dashboard" aria-label="Queue summary" data-status-region="queue-summary">
       <div class="queue-summary">
         <div>
-          <h2><%= archive ? 'Archived event' : dashboard?.state === 'running' ? 'Sending' : dashboard?.state === 'paused' ? 'Paused' : dashboard?.state === 'settings-changed' ? 'Sending settings changed' : 'Waiting to start' %></h2>
+          <h2><%= archive ? 'Archived event' : dashboard?.state === 'running' ? 'Sending' : dashboard?.state === 'paused' ? 'Paused' : dashboard?.state === 'scheduled' ? 'Scheduled to send' : dashboard?.state === 'settings-changed' ? 'Sending settings changed' : 'Waiting to start' %></h2>
+          <% if (dashboard?.state === 'scheduled') { %><p class="muted">This batch starts automatically when earlier batches finish.</p><% } %>
           <% if (!archive && mode === 'simulate') { %><p class="muted">Simulation mode · Up to <%= rate %> submissions per minute</p><% } %>
           <% if (!archive && mode === 'live') { %><p class="muted">Live mode · Up to <%= rate %> submissions per minute</p><% } %>
           <% if (dashboard?.state === 'settings-changed') { %><p class="muted">Restore the previous settings to continue, or end that batch to review its unsent work.</p><% } %>
